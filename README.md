@@ -366,6 +366,17 @@ Tokens are saved to `~/.mcp-email/` and auto-refresh before expiry. No manual to
 - [ ] Webhook for incoming email (SendGrid Inbound Parse)
 - [ ] Email templates (Handlebars/Tera)
 
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [API Reference](docs/api-reference.md) | All 24 tools with parameters, types, and examples |
+| [Backends](docs/backends.md) | Configuration for all 8 backends with setup guides |
+| [Security](docs/security.md) | Credential handling, threat model, risk classification |
+| [Architecture](docs/assets/architecture.svg) | System diagram |
+| [CHANGELOG.md](CHANGELOG.md) | Version history |
+| [mcp-server.toml](mcp-server.toml) | ADK-Rust Enterprise registry manifest |
+
 ## Registry Compliance
 
 This server implements the [ADK MCP SDK](https://crates.io/crates/adk-mcp-sdk) contract:
