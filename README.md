@@ -5,7 +5,7 @@
 [![ADK-Rust Enterprise](https://img.shields.io/badge/ADK--Rust-Enterprise-purple.svg)](https://enterprise.adk-rust.com)
 [![Registry Ready](https://img.shields.io/badge/ADK_Registry-Ready-green.svg)](https://www.zavora.ai)
 
-Multi-backend email for AI agents. Send via **SMTP**, **AWS SES**, **SendGrid**, **Gmail**, or **Microsoft Graph** — read via Gmail or Microsoft Graph. 9 tools with enterprise governance and risk classification.
+The most complete multi-backend email MCP server. **24 tools** across **5 send backends** and **3 read backends** — send via SMTP, AWS SES, or SendGrid while reading from any IMAP server. Single Rust binary with enterprise governance.
 
 ## Architecture
 
@@ -15,53 +15,129 @@ Multi-backend email for AI agents. Send via **SMTP**, **AWS SES**, **SendGrid**,
 
 ## Key Principles
 
-- **Multi-backend sending** — configure once, switch providers without code changes
-- **Separation of send/read** — use SMTP or SendGrid for sending while reading from Gmail
+- **Multi-backend** — 5 send + 3 read backends, mix and match freely
+- **IMAP-first reading** — works with any email provider, no OAuth required
+- **SMTP-first sending** — universal, works with any relay
+- **Full email lifecycle** — send, read, reply, forward, draft, organize, batch, delete
 - **No credential exposure** — tokens stay in env vars, never reach LLM context
-- **HTML support** — send rich HTML emails alongside plain text
-- **Registry-ready** — ships with `mcp-server.toml` for ADK-Rust Enterprise onboarding
+- **Single binary** — no Node.js, no Python, no runtime dependencies
 
-## Tools (9)
+## Comparison with Other Email MCP Servers
+
+| Feature | marlinjai/email-mcp | GongRzhe/Gmail-MCP | **Ours** |
+|---------|:---:|:---:|:---:|
+| Send email | ✅ | ✅ | ✅ |
+| CC/BCC | ✅ | ✅ | ✅ |
+| HTML email | ✅ | ✅ | ✅ |
+| Reply | ✅ (reply-all) | ❌ | ✅ |
+| Forward | ✅ | ❌ | ✅ |
+| Drafts (create/list/send) | ✅ | ✅ | ✅ |
+| Attachments send | ✅ | ✅ | ❌ (planned) |
+| Attachments download | ✅ | ✅ | ✅ (base64) |
+| Threads/conversations | ✅ | ❌ | ✅ |
+| Full body retrieval | ✅ | ✅ | ✅ |
+| Search | ✅ | ✅ | ✅ |
+| Mark read/unread | ✅ | ✅ | ✅ |
+| Star/flag | ✅ | ❌ | ✅ |
+| Move to folder | ✅ | ✅ | ✅ |
+| Delete (trash/permanent) | ✅ | ✅ | ✅ |
+| Labels (create/delete) | ✅ | ✅ | ✅ |
+| Batch operations | ✅ | ✅ | ✅ |
+| Filters | ❌ | ✅ | ❌ |
+| Multi-account | ✅ | ❌ | ❌ |
+| **SMTP send** | ✅ | ❌ | ✅ |
+| **IMAP read** | ✅ | ❌ | ✅ |
+| **AWS SES** | ❌ | ❌ | ✅ |
+| **SendGrid** | ❌ | ❌ | ✅ |
+| **Registry governance** | ❌ | ❌ | ✅ |
+| **Risk classification** | ❌ | ❌ | ✅ |
+| **Rust / single binary** | ❌ (Node) | ❌ (Node) | ✅ |
+| **Tools** | 24 | 18 | **24** |
+
+## Tools (24)
+
+### Sending & Composing (5)
 
 | Tool | Purpose | Risk Class |
 |------|---------|------------|
-| `send_email` | Send email (plain text + HTML) via configured backend | External write |
-| `list_inbox` | List inbox messages | Read-only |
-| `get_email` | Get a specific email by ID | Read-only |
-| `search_emails` | Search emails by query | Read-only |
-| `reply_to_email` | Reply to an email | External write |
-| `list_labels` | List email labels/folders | Read-only |
-| `move_to_folder` | Move email to a folder/label | Internal write |
-| `mark_read` | Mark an email as read | Internal write |
-| `get_attachments` | Get attachment metadata for an email | Read-only |
+| `send_email` | Send email with CC/BCC, plain text + HTML | External write |
+| `reply_to_email` | Reply to an email (preserves threading) | External write |
+| `forward_email` | Forward an email to new recipients | External write |
+| `create_draft` | Save a draft without sending | Internal write |
+| `send_draft` | Send a previously saved draft | External write |
 
-## Send Backends
+### Reading & Searching (6)
+
+| Tool | Purpose | Risk Class |
+|------|---------|------------|
+| `list_inbox` | List inbox messages | Read-only |
+| `get_email` | Get email metadata (subject, from, date) | Read-only |
+| `get_email_body` | Get full email body (HTML or plain text) | Read-only |
+| `get_thread` | Get entire email thread/conversation | Read-only |
+| `search_emails` | Search by query (Gmail syntax or IMAP SEARCH) | Read-only |
+| `download_attachment` | Download attachment content (base64) | Read-only |
+
+### Organization (7)
+
+| Tool | Purpose | Risk Class |
+|------|---------|------------|
+| `list_labels` | List all labels/folders | Read-only |
+| `list_drafts` | List saved drafts | Read-only |
+| `get_attachments` | Get attachment metadata for an email | Read-only |
+| `move_to_folder` | Move email to a folder/label | Internal write |
+| `mark_read` | Mark email as read | Internal write |
+| `mark_unread` | Mark email as unread | Internal write |
+| `star_email` | Star/flag a message | Internal write |
+
+### Management (3)
+
+| Tool | Purpose | Risk Class |
+|------|---------|------------|
+| `delete_email` | Trash or permanently delete | Destructive |
+| `create_label` | Create a new label/folder | Internal write |
+| `delete_label` | Delete a label/folder | Destructive |
+
+### Batch Operations (3)
+
+| Tool | Purpose | Risk Class |
+|------|---------|------------|
+| `batch_delete` | Delete multiple emails at once | Destructive |
+| `batch_move` | Move multiple emails to a folder | Internal write |
+| `batch_mark` | Mark multiple emails read/unread | Internal write |
+
+## Send Backends (5)
 
 | Backend | Env Vars | Use Case |
 |---------|----------|----------|
-| **SMTP** (default) | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` | Any SMTP relay (Postfix, Mailgun, Zoho, etc.) |
+| **SMTP** (default) | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` | Any SMTP relay — Postfix, Mailgun, Zoho, Gmail SMTP |
 | **SendGrid** | `SENDGRID_API_KEY`, `SENDGRID_FROM` | High-volume transactional email |
 | **AWS SES** | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `SES_FROM` | AWS-native workloads |
-| **Gmail API** | `GMAIL_ACCESS_TOKEN` | Google Workspace users |
-| **Microsoft Graph** | `MS_GRAPH_TOKEN` | Microsoft 365 users |
+| **Gmail API** | `GMAIL_ACCESS_TOKEN` | Google Workspace (OAuth) |
+| **Microsoft Graph** | `MS_GRAPH_TOKEN` | Microsoft 365 (OAuth) |
 
-### Backend Priority
+**Priority:** SMTP → SendGrid → SES → Gmail → Microsoft
 
-If multiple env vars are set, the server picks the first match:
+## Read Backends (3)
 
-```
-SMTP → SendGrid → AWS SES → Gmail → Microsoft
-```
+| Backend | Env Vars | Use Case |
+|---------|----------|----------|
+| **IMAP** (default) | `IMAP_HOST`, `IMAP_PORT`, `IMAP_USERNAME`, `IMAP_PASSWORD` | Any provider — no OAuth needed |
+| **Gmail API** | `GMAIL_ACCESS_TOKEN` | Full Gmail features (threads, labels) |
+| **Microsoft Graph** | `MS_GRAPH_TOKEN` | Full Outlook features (folders, categories) |
 
-## Read Backends
+**Priority:** IMAP → Gmail → Microsoft
 
-| Backend | Env Vars | Capabilities |
-|---------|----------|-------------|
-| **IMAP** (default) | `IMAP_HOST`, `IMAP_PORT`, `IMAP_USERNAME`, `IMAP_PASSWORD` | Inbox, search, flags — works with any email provider |
-| **Gmail API** | `GMAIL_ACCESS_TOKEN` | Inbox, search, labels, attachments |
-| **Microsoft Graph** | `MS_GRAPH_TOKEN` | Inbox, search, folders, attachments |
+### Common IMAP Hosts
 
-> **IMAP works with any provider** — Gmail, Outlook, Yahoo, Fastmail, Zoho, self-hosted. No OAuth needed, just host/user/password.
+| Provider | Host | Port |
+|----------|------|------|
+| Gmail | `imap.gmail.com` | 993 |
+| Outlook | `outlook.office365.com` | 993 |
+| Yahoo | `imap.mail.yahoo.com` | 993 |
+| Fastmail | `imap.fastmail.com` | 993 |
+| Zoho | `imap.zoho.com` | 993 |
+| iCloud | `imap.mail.me.com` | 993 |
+| ProtonMail | `127.0.0.1` (Bridge) | 1143 |
 
 ## Installation
 
@@ -77,9 +153,9 @@ cd mcp-email
 cargo build --release
 ```
 
-## Configuration
+## Configuration Examples
 
-### SMTP (works with any provider)
+### SMTP + IMAP (universal — works with any provider)
 
 ```bash
 export SMTP_HOST="smtp.gmail.com"
@@ -87,58 +163,31 @@ export SMTP_PORT="587"
 export SMTP_USERNAME="you@gmail.com"
 export SMTP_PASSWORD="app-password"
 export SMTP_FROM="you@gmail.com"
-```
-
-### IMAP (read inbox — works with any provider)
-
-```bash
 export IMAP_HOST="imap.gmail.com"
 export IMAP_PORT="993"
 export IMAP_USERNAME="you@gmail.com"
 export IMAP_PASSWORD="app-password"
 ```
 
-Common IMAP hosts:
-- Gmail: `imap.gmail.com:993`
-- Outlook: `outlook.office365.com:993`
-- Yahoo: `imap.mail.yahoo.com:993`
-- Fastmail: `imap.fastmail.com:993`
-- Zoho: `imap.zoho.com:993`
-
-### SendGrid
+### SendGrid (send) + Gmail API (read)
 
 ```bash
 export SENDGRID_API_KEY="SG.xxxx"
-export SENDGRID_FROM="noreply@yourdomain.com"
+export SENDGRID_FROM="noreply@company.com"
+export GMAIL_ACCESS_TOKEN="ya29.xxxx"
 ```
 
-### AWS SES
+### AWS SES (send) + IMAP (read)
 
 ```bash
 export AWS_ACCESS_KEY_ID="AKIA..."
 export AWS_SECRET_ACCESS_KEY="..."
 export AWS_REGION="us-east-1"
-export SES_FROM="noreply@yourdomain.com"
-```
-
-### Gmail (send + read)
-
-```bash
-export GMAIL_ACCESS_TOKEN="ya29.xxxx"
-```
-
-### Microsoft Graph (send + read)
-
-```bash
-export MS_GRAPH_TOKEN="eyJ0..."
-```
-
-### Combined: SendGrid for sending + Gmail for reading
-
-```bash
-export SENDGRID_API_KEY="SG.xxxx"
-export SENDGRID_FROM="noreply@company.com"
-export GMAIL_ACCESS_TOKEN="ya29.xxxx"  # enables read tools
+export SES_FROM="noreply@company.com"
+export IMAP_HOST="imap.gmail.com"
+export IMAP_PORT="993"
+export IMAP_USERNAME="you@gmail.com"
+export IMAP_PASSWORD="app-password"
 ```
 
 ## Client Configuration
@@ -157,7 +206,10 @@ export GMAIL_ACCESS_TOKEN="ya29.xxxx"  # enables read tools
         "SMTP_USERNAME": "you@gmail.com",
         "SMTP_PASSWORD": "app-password",
         "SMTP_FROM": "you@gmail.com",
-        "GMAIL_ACCESS_TOKEN": "ya29.xxxx"
+        "IMAP_HOST": "imap.gmail.com",
+        "IMAP_PORT": "993",
+        "IMAP_USERNAME": "you@gmail.com",
+        "IMAP_PASSWORD": "app-password"
       }
     }
   }
@@ -176,7 +228,11 @@ Add to `.kiro/settings/mcp.json`:
       "args": [],
       "env": {
         "SENDGRID_API_KEY": "SG.xxxx",
-        "SENDGRID_FROM": "noreply@company.com"
+        "SENDGRID_FROM": "noreply@company.com",
+        "IMAP_HOST": "imap.gmail.com",
+        "IMAP_PORT": "993",
+        "IMAP_USERNAME": "you@gmail.com",
+        "IMAP_PASSWORD": "app-password"
       }
     }
   }
@@ -186,6 +242,28 @@ Add to `.kiro/settings/mcp.json`:
 ### Cursor
 
 Add to `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "email": {
+      "command": "mcp-email",
+      "args": [],
+      "env": {
+        "SMTP_HOST": "smtp.gmail.com",
+        "SMTP_PORT": "587",
+        "SMTP_USERNAME": "you@gmail.com",
+        "SMTP_PASSWORD": "app-password",
+        "SMTP_FROM": "you@gmail.com"
+      }
+    }
+  }
+}
+```
+
+### Windsurf
+
+Add to `~/.codeium/windsurf/mcp_config.json`:
 
 ```json
 {
@@ -204,22 +282,42 @@ Add to `.cursor/mcp.json`:
 
 ## Usage Examples
 
-### Send an email
+### Send an email with CC
 ```
-"Send an email to james@company.com about the deployment being ready"
-→ calls send_email with to, subject, body
-```
-
-### Search and reply
-```
-"Find the email from Sarah about the budget and reply saying I approve"
-→ calls search_emails → reply_to_email
+"Send an email to james@company.com, CC sarah@company.com, about the deployment being ready"
+→ calls send_email with to, cc, subject, body
 ```
 
-### Organize inbox
+### Forward an email
 ```
-"Move all unread emails from marketing to the Promotions folder"
-→ calls list_inbox → move_to_folder
+"Forward the latest email from the client to the legal team"
+→ calls search_emails → forward_email
+```
+
+### Draft and review before sending
+```
+"Draft a reply to Bob's email but don't send it yet"
+→ calls create_draft
+"OK send that draft"
+→ calls send_draft
+```
+
+### Batch organize
+```
+"Move all emails from newsletters@company.com to the Archive folder"
+→ calls search_emails → batch_move
+```
+
+### Read a thread
+```
+"Show me the full conversation thread about the budget proposal"
+→ calls search_emails → get_thread
+```
+
+### Download attachment
+```
+"Download the PDF attachment from Sarah's last email"
+→ calls search_emails → get_attachments → download_attachment
 ```
 
 ## MCP Server Manifest
@@ -227,21 +325,24 @@ Add to `.cursor/mcp.json`:
 ```toml
 server_id = "mcp_email"
 display_name = "Email"
-version = "1.1.0"
+version = "1.3.0"
 domain = "collaboration"
 risk_level = "medium"
 writes_allowed = "gated"
 transports = ["stdio"]
 credentials = ["vault://email-credentials"]
+governance_gates = []
+environments = ["development", "staging", "production"]
 ```
 
 ## Roadmap
 
-- [ ] IMAP read backend (generic inbox access without OAuth)
-- [ ] Attachment download (content, not just metadata)
+- [ ] File attachment sending (local file paths)
+- [ ] Email filters (create/list/delete rules)
+- [ ] Multi-account support
+- [ ] OAuth2 PKCE flow for Gmail/Microsoft (no manual token)
+- [ ] Webhook for incoming email (SendGrid Inbound Parse)
 - [ ] Email templates (Handlebars/Tera)
-- [ ] Batch send (multiple recipients)
-- [ ] Webhook support for incoming email (SendGrid Inbound Parse)
 
 ## Registry Compliance
 

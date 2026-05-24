@@ -15,60 +15,132 @@ pub struct SendEmailInput {
     /// Optional HTML body
     #[serde(default)]
     pub html: Option<String>,
+    /// Optional CC recipients (comma-separated)
+    #[serde(default)]
+    pub cc: Option<String>,
+    /// Optional BCC recipients (comma-separated)
+    #[serde(default)]
+    pub bcc: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ListInboxInput {
-    /// Max messages to return (default 20)
     #[serde(default = "default_20")]
     pub limit: u32,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct GetEmailInput {
-    /// Message ID
     pub id: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SearchEmailsInput {
-    /// Search query (Gmail syntax or Microsoft $search)
     pub query: String,
-    /// Max results (default 20)
     #[serde(default = "default_20")]
     pub limit: u32,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ReplyInput {
-    /// Message ID to reply to
     pub message_id: String,
-    /// Reply body text
     pub body: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct MoveInput {
-    /// Message ID
     pub message_id: String,
-    /// Target folder/label ID
     pub folder: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct MarkReadInput {
-    /// Message ID
-    pub message_id: String,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct GetAttachmentsInput {
-    /// Message ID
+pub struct MessageIdInput {
     pub message_id: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct EmptyInput {}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ForwardEmailInput {
+    pub message_id: String,
+    /// Recipient to forward to
+    pub to: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CreateDraftInput {
+    pub to: String,
+    pub subject: String,
+    pub body: String,
+    #[serde(default)]
+    pub html: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ListDraftsInput {
+    #[serde(default = "default_20")]
+    pub limit: u32,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SendDraftInput {
+    pub draft_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteEmailInput {
+    pub message_id: String,
+    /// If true, permanently delete; otherwise move to trash
+    #[serde(default)]
+    pub permanent: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GetEmailBodyInput {
+    pub message_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GetThreadInput {
+    pub message_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DownloadAttachmentInput {
+    pub message_id: String,
+    pub attachment_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CreateLabelInput {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteLabelInput {
+    pub label_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct BatchDeleteInput {
+    pub message_ids: Vec<String>,
+    #[serde(default)]
+    pub permanent: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct BatchMoveInput {
+    pub message_ids: Vec<String>,
+    pub folder: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct BatchMarkInput {
+    pub message_ids: Vec<String>,
+    /// true = mark read, false = mark unread
+    pub read: bool,
+}
 
 fn default_20() -> u32 { 20 }
 
@@ -79,15 +151,15 @@ pub struct EmailServer {
 
 #[tool_router(server_handler)]
 impl EmailServer {
-    #[tool(description = "Send an email (supports plain text and HTML). Uses configured backend: SMTP, SendGrid, AWS SES, Gmail, or Microsoft Graph.")]
+    #[tool(description = "Send an email (supports plain text, HTML, CC, BCC). Uses configured backend.")]
     async fn send_email(&self, Parameters(i): Parameters<SendEmailInput>) -> String {
-        match self.client.send_email(&i.to, &i.subject, &i.body, i.html.as_deref()).await {
+        match self.client.send_email(&i.to, &i.subject, &i.body, i.html.as_deref(), i.cc.as_deref(), i.bcc.as_deref()).await {
             Ok(r) => format!("Email sent via {} (id: {})", r.backend, r.message_id),
             Err(e) => format!("Error: {e}"),
         }
     }
 
-    #[tool(description = "List inbox messages (requires Gmail or Microsoft Graph read backend)")]
+    #[tool(description = "List inbox messages")]
     async fn list_inbox(&self, Parameters(i): Parameters<ListInboxInput>) -> String {
         match self.client.list_inbox(i.limit).await {
             Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
@@ -136,7 +208,7 @@ impl EmailServer {
     }
 
     #[tool(description = "Mark an email as read")]
-    async fn mark_read(&self, Parameters(i): Parameters<MarkReadInput>) -> String {
+    async fn mark_read(&self, Parameters(i): Parameters<MessageIdInput>) -> String {
         match self.client.mark_read(&i.message_id).await {
             Ok(()) => "Marked as read".into(),
             Err(e) => format!("Error: {e}"),
@@ -144,9 +216,129 @@ impl EmailServer {
     }
 
     #[tool(description = "Get attachments for an email")]
-    async fn get_attachments(&self, Parameters(i): Parameters<GetAttachmentsInput>) -> String {
+    async fn get_attachments(&self, Parameters(i): Parameters<MessageIdInput>) -> String {
         match self.client.get_attachments(&i.message_id).await {
             Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "Forward an email to new recipients")]
+    async fn forward_email(&self, Parameters(i): Parameters<ForwardEmailInput>) -> String {
+        match self.client.forward_email(&i.message_id, &i.to).await {
+            Ok(id) => format!("Forwarded (id: {id})"),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "Create a draft email without sending")]
+    async fn create_draft(&self, Parameters(i): Parameters<CreateDraftInput>) -> String {
+        match self.client.create_draft(&i.to, &i.subject, &i.body, i.html.as_deref()).await {
+            Ok(id) => format!("Draft created (id: {id})"),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "List saved drafts")]
+    async fn list_drafts(&self, Parameters(i): Parameters<ListDraftsInput>) -> String {
+        match self.client.list_drafts(i.limit).await {
+            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "Send a saved draft")]
+    async fn send_draft(&self, Parameters(i): Parameters<SendDraftInput>) -> String {
+        match self.client.send_draft(&i.draft_id).await {
+            Ok(id) => format!("Draft sent (id: {id})"),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "Delete an email (trash or permanent)")]
+    async fn delete_email(&self, Parameters(i): Parameters<DeleteEmailInput>) -> String {
+        match self.client.delete_email(&i.message_id, i.permanent.unwrap_or(false)).await {
+            Ok(()) => "Deleted".into(),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "Mark an email as unread")]
+    async fn mark_unread(&self, Parameters(i): Parameters<MessageIdInput>) -> String {
+        match self.client.mark_unread(&i.message_id).await {
+            Ok(()) => "Marked as unread".into(),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "Star/flag an email")]
+    async fn star_email(&self, Parameters(i): Parameters<MessageIdInput>) -> String {
+        match self.client.star_email(&i.message_id).await {
+            Ok(()) => "Starred".into(),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "Get full email body content (HTML or text)")]
+    async fn get_email_body(&self, Parameters(i): Parameters<GetEmailBodyInput>) -> String {
+        match self.client.get_email_body(&i.message_id).await {
+            Ok(body) => body,
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "Get email thread/conversation")]
+    async fn get_thread(&self, Parameters(i): Parameters<GetThreadInput>) -> String {
+        match self.client.get_thread(&i.message_id).await {
+            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "Download attachment content as base64")]
+    async fn download_attachment(&self, Parameters(i): Parameters<DownloadAttachmentInput>) -> String {
+        match self.client.download_attachment(&i.message_id, &i.attachment_id).await {
+            Ok(data) => data,
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "Create a new label/folder")]
+    async fn create_label(&self, Parameters(i): Parameters<CreateLabelInput>) -> String {
+        match self.client.create_label(&i.name).await {
+            Ok(id) => format!("Label created (id: {id})"),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "Delete a label/folder")]
+    async fn delete_label(&self, Parameters(i): Parameters<DeleteLabelInput>) -> String {
+        match self.client.delete_label(&i.label_id).await {
+            Ok(()) => "Label deleted".into(),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "Delete multiple emails at once")]
+    async fn batch_delete(&self, Parameters(i): Parameters<BatchDeleteInput>) -> String {
+        match self.client.batch_delete(&i.message_ids, i.permanent.unwrap_or(false)).await {
+            Ok(msg) => msg,
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "Move multiple emails to a folder")]
+    async fn batch_move(&self, Parameters(i): Parameters<BatchMoveInput>) -> String {
+        match self.client.batch_move(&i.message_ids, &i.folder).await {
+            Ok(msg) => msg,
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "Mark multiple emails as read or unread")]
+    async fn batch_mark(&self, Parameters(i): Parameters<BatchMarkInput>) -> String {
+        match self.client.batch_mark(&i.message_ids, i.read).await {
+            Ok(msg) => msg,
             Err(e) => format!("Error: {e}"),
         }
     }

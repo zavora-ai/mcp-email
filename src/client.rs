@@ -75,7 +75,7 @@ impl EmailClient {
 
     // ─── SEND ────────────────────────────────────────────────────────────────
 
-    pub async fn send_email(&self, to: &str, subject: &str, body: &str, html: Option<&str>) -> anyhow::Result<SendResult> {
+    pub async fn send_email(&self, to: &str, subject: &str, body: &str, html: Option<&str>, _cc: Option<&str>, _bcc: Option<&str>) -> anyhow::Result<SendResult> {
         match &self.send_backend {
             SendBackend::Smtp { host, port, username, password, from } => {
                 self.send_smtp(host, *port, username, password, from, to, subject, body).await
@@ -565,6 +565,397 @@ impl EmailClient {
         }
     }
 
+    pub async fn forward_email(&self, message_id: &str, to: &str) -> anyhow::Result<String> {
+        if self.is_imap() { anyhow::bail!("Not supported on IMAP"); }
+        let (token, is_gmail) = self.read_token()?;
+        if is_gmail {
+            let orig: serde_json::Value = self.http
+                .get(format!("https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}"))
+                .bearer_auth(token).query(&[("format", "full")])
+                .send().await?.error_for_status()?.json().await?;
+            let snippet = orig["snippet"].as_str().unwrap_or("");
+            let subject = format!("Fwd: {}", orig["payload"]["headers"].as_array()
+                .and_then(|h| h.iter().find(|x| x["name"].as_str() == Some("Subject")))
+                .and_then(|x| x["value"].as_str()).unwrap_or(""));
+            let raw = format!("To: {to}\r\nSubject: {subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n---------- Forwarded message ----------\r\n{snippet}");
+            let encoded = base64_url_encode(raw.as_bytes());
+            let resp: serde_json::Value = self.http
+                .post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send")
+                .bearer_auth(token).json(&serde_json::json!({"raw": encoded}))
+                .send().await?.error_for_status()?.json().await?;
+            Ok(resp["id"].as_str().unwrap_or("sent").to_string())
+        } else {
+            self.http.post(format!("https://graph.microsoft.com/v1.0/me/messages/{message_id}/forward"))
+                .bearer_auth(token)
+                .json(&serde_json::json!({"toRecipients": [{"emailAddress": {"address": to}}]}))
+                .send().await?.error_for_status()?;
+            Ok("forwarded".to_string())
+        }
+    }
+
+    pub async fn create_draft(&self, to: &str, subject: &str, body: &str, html: Option<&str>) -> anyhow::Result<String> {
+        if self.is_imap() { anyhow::bail!("Not supported on IMAP"); }
+        let (token, is_gmail) = self.read_token()?;
+        if is_gmail {
+            let content = if let Some(h) = html {
+                format!("To: {to}\r\nSubject: {subject}\r\nContent-Type: text/html; charset=utf-8\r\n\r\n{h}")
+            } else {
+                format!("To: {to}\r\nSubject: {subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{body}")
+            };
+            let encoded = base64_url_encode(content.as_bytes());
+            let resp: serde_json::Value = self.http
+                .post("https://gmail.googleapis.com/gmail/v1/users/me/drafts")
+                .bearer_auth(token).json(&serde_json::json!({"message": {"raw": encoded}}))
+                .send().await?.error_for_status()?.json().await?;
+            Ok(resp["id"].as_str().unwrap_or("created").to_string())
+        } else {
+            let msg = serde_json::json!({
+                "subject": subject,
+                "body": {"contentType": if html.is_some() { "HTML" } else { "Text" }, "content": html.unwrap_or(body)},
+                "toRecipients": [{"emailAddress": {"address": to}}]
+            });
+            let resp: serde_json::Value = self.http
+                .post("https://graph.microsoft.com/v1.0/me/messages")
+                .bearer_auth(token).json(&msg)
+                .send().await?.error_for_status()?.json().await?;
+            Ok(resp["id"].as_str().unwrap_or("created").to_string())
+        }
+    }
+
+    pub async fn list_drafts(&self, limit: u32) -> anyhow::Result<Vec<EmailMessage>> {
+        if self.is_imap() { anyhow::bail!("Not supported on IMAP"); }
+        let (token, is_gmail) = self.read_token()?;
+        if is_gmail {
+            let resp: serde_json::Value = self.http
+                .get("https://gmail.googleapis.com/gmail/v1/users/me/drafts")
+                .bearer_auth(token).query(&[("maxResults", limit.to_string())])
+                .send().await?.error_for_status()?.json().await?;
+            let mut msgs = Vec::new();
+            if let Some(drafts) = resp["drafts"].as_array() {
+                for d in drafts.iter().take(limit as usize) {
+                    if let Some(id) = d["message"]["id"].as_str() {
+                        if let Ok(m) = self.get_email(id).await { msgs.push(m); }
+                    }
+                }
+            }
+            Ok(msgs)
+        } else {
+            let resp: serde_json::Value = self.http
+                .get("https://graph.microsoft.com/v1.0/me/mailFolders/drafts/messages")
+                .bearer_auth(token).query(&[("$top", &limit.to_string())])
+                .send().await?.error_for_status()?.json().await?;
+            Ok(parse_ms_messages(&resp))
+        }
+    }
+
+    pub async fn send_draft(&self, draft_id: &str) -> anyhow::Result<String> {
+        if self.is_imap() { anyhow::bail!("Not supported on IMAP"); }
+        let (token, is_gmail) = self.read_token()?;
+        if is_gmail {
+            let resp: serde_json::Value = self.http
+                .post(format!("https://gmail.googleapis.com/gmail/v1/users/me/drafts/send"))
+                .bearer_auth(token).json(&serde_json::json!({"id": draft_id}))
+                .send().await?.error_for_status()?.json().await?;
+            Ok(resp["id"].as_str().unwrap_or("sent").to_string())
+        } else {
+            self.http.post(format!("https://graph.microsoft.com/v1.0/me/messages/{draft_id}/send"))
+                .bearer_auth(token).send().await?.error_for_status()?;
+            Ok("sent".to_string())
+        }
+    }
+
+    pub async fn delete_email(&self, message_id: &str, permanent: bool) -> anyhow::Result<()> {
+        if self.is_imap() {
+            let (host, port, username, password) = match &self.read_backend {
+                Some(ReadBackend::Imap { host, port, username, password }) => (host.clone(), *port, username.clone(), password.clone()),
+                _ => anyhow::bail!("Not IMAP backend"),
+            };
+            use tokio_util::compat::TokioAsyncReadCompatExt;
+            use futures::TryStreamExt;
+            let tcp = tokio::net::TcpStream::connect(format!("{host}:{port}")).await?;
+            let tls = {
+                let mut root_store = tokio_rustls::rustls::RootCertStore::empty();
+                root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+                let config = tokio_rustls::rustls::ClientConfig::builder().with_root_certificates(root_store).with_no_client_auth();
+                let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(config));
+                let domain = rustls_pki_types::ServerName::try_from(host.as_str())?.to_owned();
+                connector.connect(domain, tcp).await?
+            };
+            let mut client = async_imap::Client::new(tls.compat());
+            let _greeting = client.read_response().await;
+            let mut session = client.login(&username, &password).await.map_err(|e| anyhow::anyhow!("{}", e.0))?;
+            session.select("INBOX").await?;
+            let _: Vec<_> = session.store(message_id, "+FLAGS (\\Deleted)").await?.try_collect().await?;
+            if permanent { let _: Vec<_> = session.expunge().await?.try_collect().await?; }
+            session.logout().await?;
+            return Ok(());
+        }
+        let (token, is_gmail) = self.read_token()?;
+        if is_gmail {
+            if permanent {
+                self.http.delete(format!("https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}"))
+                    .bearer_auth(token).send().await?.error_for_status()?;
+            } else {
+                self.http.post(format!("https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}/trash"))
+                    .bearer_auth(token).send().await?.error_for_status()?;
+            }
+        } else {
+            if permanent {
+                self.http.delete(format!("https://graph.microsoft.com/v1.0/me/messages/{message_id}"))
+                    .bearer_auth(token).send().await?.error_for_status()?;
+            } else {
+                self.http.post(format!("https://graph.microsoft.com/v1.0/me/messages/{message_id}/move"))
+                    .bearer_auth(token).json(&serde_json::json!({"destinationId": "deleteditems"}))
+                    .send().await?.error_for_status()?;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn mark_unread(&self, message_id: &str) -> anyhow::Result<()> {
+        if self.is_imap() {
+            let (host, port, username, password) = match &self.read_backend {
+                Some(ReadBackend::Imap { host, port, username, password }) => (host.clone(), *port, username.clone(), password.clone()),
+                _ => anyhow::bail!("Not IMAP backend"),
+            };
+            use tokio_util::compat::TokioAsyncReadCompatExt;
+            use futures::TryStreamExt;
+            let tcp = tokio::net::TcpStream::connect(format!("{host}:{port}")).await?;
+            let tls = {
+                let mut root_store = tokio_rustls::rustls::RootCertStore::empty();
+                root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+                let config = tokio_rustls::rustls::ClientConfig::builder().with_root_certificates(root_store).with_no_client_auth();
+                let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(config));
+                let domain = rustls_pki_types::ServerName::try_from(host.as_str())?.to_owned();
+                connector.connect(domain, tcp).await?
+            };
+            let mut client = async_imap::Client::new(tls.compat());
+            let _greeting = client.read_response().await;
+            let mut session = client.login(&username, &password).await.map_err(|e| anyhow::anyhow!("{}", e.0))?;
+            session.select("INBOX").await?;
+            let _: Vec<_> = session.store(message_id, "-FLAGS (\\Seen)").await?.try_collect().await?;
+            session.logout().await?;
+            return Ok(());
+        }
+        let (token, is_gmail) = self.read_token()?;
+        if is_gmail {
+            self.http.post(format!("https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}/modify"))
+                .bearer_auth(token).json(&serde_json::json!({"addLabelIds": ["UNREAD"]}))
+                .send().await?.error_for_status()?;
+        } else {
+            self.http.patch(format!("https://graph.microsoft.com/v1.0/me/messages/{message_id}"))
+                .bearer_auth(token).json(&serde_json::json!({"isRead": false}))
+                .send().await?.error_for_status()?;
+        }
+        Ok(())
+    }
+
+    pub async fn star_email(&self, message_id: &str) -> anyhow::Result<()> {
+        if self.is_imap() { anyhow::bail!("Not supported on IMAP"); }
+        let (token, is_gmail) = self.read_token()?;
+        if is_gmail {
+            self.http.post(format!("https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}/modify"))
+                .bearer_auth(token).json(&serde_json::json!({"addLabelIds": ["STARRED"]}))
+                .send().await?.error_for_status()?;
+        } else {
+            self.http.patch(format!("https://graph.microsoft.com/v1.0/me/messages/{message_id}"))
+                .bearer_auth(token).json(&serde_json::json!({"flag": {"flagStatus": "flagged"}}))
+                .send().await?.error_for_status()?;
+        }
+        Ok(())
+    }
+
+    pub async fn get_email_body(&self, message_id: &str) -> anyhow::Result<String> {
+        if self.is_imap() {
+            let (host, port, username, password) = match &self.read_backend {
+                Some(ReadBackend::Imap { host, port, username, password }) => (host.clone(), *port, username.clone(), password.clone()),
+                _ => anyhow::bail!("Not IMAP backend"),
+            };
+            use tokio_util::compat::TokioAsyncReadCompatExt;
+            use futures::TryStreamExt;
+            let tcp = tokio::net::TcpStream::connect(format!("{host}:{port}")).await?;
+            let tls = {
+                let mut root_store = tokio_rustls::rustls::RootCertStore::empty();
+                root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+                let config = tokio_rustls::rustls::ClientConfig::builder().with_root_certificates(root_store).with_no_client_auth();
+                let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(config));
+                let domain = rustls_pki_types::ServerName::try_from(host.as_str())?.to_owned();
+                connector.connect(domain, tcp).await?
+            };
+            let mut client = async_imap::Client::new(tls.compat());
+            let _greeting = client.read_response().await;
+            let mut session = client.login(&username, &password).await.map_err(|e| anyhow::anyhow!("{}", e.0))?;
+            session.select("INBOX").await?;
+            let messages: Vec<_> = session.fetch(message_id, "BODY[]").await?.try_collect().await?;
+            let body = messages.first().and_then(|m| m.body()).map(|b| String::from_utf8_lossy(b).to_string()).unwrap_or_default();
+            session.logout().await?;
+            return Ok(body);
+        }
+        let (token, is_gmail) = self.read_token()?;
+        if is_gmail {
+            let resp: serde_json::Value = self.http
+                .get(format!("https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}"))
+                .bearer_auth(token).query(&[("format", "full")])
+                .send().await?.error_for_status()?.json().await?;
+            // Try to find text/html or text/plain part
+            if let Some(parts) = resp["payload"]["parts"].as_array() {
+                for p in parts {
+                    if p["mimeType"].as_str() == Some("text/html") || p["mimeType"].as_str() == Some("text/plain") {
+                        if let Some(data) = p["body"]["data"].as_str() {
+                            return Ok(String::from_utf8_lossy(&base64_url_decode(data)).to_string());
+                        }
+                    }
+                }
+            }
+            // Single-part message
+            if let Some(data) = resp["payload"]["body"]["data"].as_str() {
+                return Ok(String::from_utf8_lossy(&base64_url_decode(data)).to_string());
+            }
+            Ok(resp["snippet"].as_str().unwrap_or("").to_string())
+        } else {
+            let resp: serde_json::Value = self.http
+                .get(format!("https://graph.microsoft.com/v1.0/me/messages/{message_id}"))
+                .bearer_auth(token).query(&[("$select", "body")])
+                .send().await?.error_for_status()?.json().await?;
+            Ok(resp["body"]["content"].as_str().unwrap_or("").to_string())
+        }
+    }
+
+    pub async fn get_thread(&self, message_id: &str) -> anyhow::Result<Vec<EmailMessage>> {
+        if self.is_imap() { anyhow::bail!("Not supported on IMAP"); }
+        let (token, is_gmail) = self.read_token()?;
+        if is_gmail {
+            // Get message to find threadId
+            let msg: serde_json::Value = self.http
+                .get(format!("https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}"))
+                .bearer_auth(token).query(&[("format", "metadata")])
+                .send().await?.error_for_status()?.json().await?;
+            let thread_id = msg["threadId"].as_str().unwrap_or(message_id);
+            let resp: serde_json::Value = self.http
+                .get(format!("https://gmail.googleapis.com/gmail/v1/users/me/threads/{thread_id}"))
+                .bearer_auth(token).query(&[("format", "metadata")])
+                .send().await?.error_for_status()?.json().await?;
+            Ok(resp["messages"].as_array()
+                .map(|a| a.iter().map(|m| parse_gmail_message(m)).collect())
+                .unwrap_or_default())
+        } else {
+            // Microsoft: get conversationId then filter
+            let msg: serde_json::Value = self.http
+                .get(format!("https://graph.microsoft.com/v1.0/me/messages/{message_id}"))
+                .bearer_auth(token).query(&[("$select", "conversationId")])
+                .send().await?.error_for_status()?.json().await?;
+            let conv_id = msg["conversationId"].as_str().unwrap_or("");
+            let resp: serde_json::Value = self.http
+                .get("https://graph.microsoft.com/v1.0/me/messages")
+                .bearer_auth(token).query(&[("$filter", &format!("conversationId eq '{conv_id}'")), ("$top", &"50".to_string())])
+                .send().await?.error_for_status()?.json().await?;
+            Ok(parse_ms_messages(&resp))
+        }
+    }
+
+    pub async fn download_attachment(&self, message_id: &str, attachment_id: &str) -> anyhow::Result<String> {
+        if self.is_imap() { anyhow::bail!("Not supported on IMAP"); }
+        let (token, is_gmail) = self.read_token()?;
+        if is_gmail {
+            let resp: serde_json::Value = self.http
+                .get(format!("https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}/attachments/{attachment_id}"))
+                .bearer_auth(token).send().await?.error_for_status()?.json().await?;
+            Ok(resp["data"].as_str().unwrap_or("").to_string())
+        } else {
+            let resp: serde_json::Value = self.http
+                .get(format!("https://graph.microsoft.com/v1.0/me/messages/{message_id}/attachments/{attachment_id}"))
+                .bearer_auth(token).send().await?.error_for_status()?.json().await?;
+            Ok(resp["contentBytes"].as_str().unwrap_or("").to_string())
+        }
+    }
+
+    pub async fn create_label(&self, name: &str) -> anyhow::Result<String> {
+        if self.is_imap() { anyhow::bail!("Not supported on IMAP"); }
+        let (token, is_gmail) = self.read_token()?;
+        if is_gmail {
+            let resp: serde_json::Value = self.http
+                .post("https://gmail.googleapis.com/gmail/v1/users/me/labels")
+                .bearer_auth(token).json(&serde_json::json!({"name": name}))
+                .send().await?.error_for_status()?.json().await?;
+            Ok(resp["id"].as_str().unwrap_or("created").to_string())
+        } else {
+            let resp: serde_json::Value = self.http
+                .post("https://graph.microsoft.com/v1.0/me/mailFolders")
+                .bearer_auth(token).json(&serde_json::json!({"displayName": name}))
+                .send().await?.error_for_status()?.json().await?;
+            Ok(resp["id"].as_str().unwrap_or("created").to_string())
+        }
+    }
+
+    pub async fn delete_label(&self, label_id: &str) -> anyhow::Result<()> {
+        if self.is_imap() { anyhow::bail!("Not supported on IMAP"); }
+        let (token, is_gmail) = self.read_token()?;
+        if is_gmail {
+            self.http.delete(format!("https://gmail.googleapis.com/gmail/v1/users/me/labels/{label_id}"))
+                .bearer_auth(token).send().await?.error_for_status()?;
+        } else {
+            self.http.delete(format!("https://graph.microsoft.com/v1.0/me/mailFolders/{label_id}"))
+                .bearer_auth(token).send().await?.error_for_status()?;
+        }
+        Ok(())
+    }
+
+    pub async fn batch_delete(&self, message_ids: &[String], permanent: bool) -> anyhow::Result<String> {
+        if self.is_imap() { anyhow::bail!("Not supported on IMAP"); }
+        let (token, is_gmail) = self.read_token()?;
+        if is_gmail {
+            if permanent {
+                self.http.post("https://gmail.googleapis.com/gmail/v1/users/me/messages/batchDelete")
+                    .bearer_auth(token).json(&serde_json::json!({"ids": message_ids}))
+                    .send().await?.error_for_status()?;
+            } else {
+                self.http.post("https://gmail.googleapis.com/gmail/v1/users/me/messages/batchModify")
+                    .bearer_auth(token).json(&serde_json::json!({"ids": message_ids, "addLabelIds": ["TRASH"]}))
+                    .send().await?.error_for_status()?;
+            }
+        } else {
+            for id in message_ids {
+                self.delete_email(id, permanent).await?;
+            }
+        }
+        Ok(format!("Deleted {} messages", message_ids.len()))
+    }
+
+    pub async fn batch_move(&self, message_ids: &[String], folder: &str) -> anyhow::Result<String> {
+        if self.is_imap() { anyhow::bail!("Not supported on IMAP"); }
+        let (token, is_gmail) = self.read_token()?;
+        if is_gmail {
+            self.http.post("https://gmail.googleapis.com/gmail/v1/users/me/messages/batchModify")
+                .bearer_auth(token).json(&serde_json::json!({"ids": message_ids, "addLabelIds": [folder]}))
+                .send().await?.error_for_status()?;
+        } else {
+            for id in message_ids {
+                self.move_to_folder(id, folder).await?;
+            }
+        }
+        Ok(format!("Moved {} messages to {folder}", message_ids.len()))
+    }
+
+    pub async fn batch_mark(&self, message_ids: &[String], read: bool) -> anyhow::Result<String> {
+        if self.is_imap() { anyhow::bail!("Not supported on IMAP"); }
+        let (token, is_gmail) = self.read_token()?;
+        if is_gmail {
+            let body = if read {
+                serde_json::json!({"ids": message_ids, "removeLabelIds": ["UNREAD"]})
+            } else {
+                serde_json::json!({"ids": message_ids, "addLabelIds": ["UNREAD"]})
+            };
+            self.http.post("https://gmail.googleapis.com/gmail/v1/users/me/messages/batchModify")
+                .bearer_auth(token).json(&body)
+                .send().await?.error_for_status()?;
+        } else {
+            for id in message_ids {
+                if read { self.mark_read(id).await?; } else { self.mark_unread(id).await?; }
+            }
+        }
+        Ok(format!("Marked {} messages as {}", message_ids.len(), if read { "read" } else { "unread" }))
+    }
+
     pub fn backend_name(&self) -> &str {
         match &self.send_backend {
             SendBackend::Smtp { .. } => "smtp",
@@ -596,6 +987,32 @@ fn base64_encode(data: &[u8]) -> String {
 
 fn base64_url_encode(data: &[u8]) -> String {
     base64_encode(data).replace('+', "-").replace('/', "_").trim_end_matches('=').to_string()
+}
+
+fn base64_url_decode(data: &str) -> Vec<u8> {
+    let s = data.replace('-', "+").replace('_', "/");
+    let padded = match s.len() % 4 {
+        2 => format!("{s}=="),
+        3 => format!("{s}="),
+        _ => s,
+    };
+    let chars = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = Vec::new();
+    let bytes: Vec<u8> = padded.bytes().filter(|&b| b != b'=').map(|b| {
+        chars.iter().position(|&c| c == b).unwrap_or(0) as u8
+    }).collect();
+    for chunk in bytes.chunks(4) {
+        if chunk.len() >= 2 {
+            result.push((chunk[0] << 2) | (chunk[1] >> 4));
+        }
+        if chunk.len() >= 3 {
+            result.push((chunk[1] << 4) | (chunk[2] >> 2));
+        }
+        if chunk.len() >= 4 {
+            result.push((chunk[2] << 6) | chunk[3]);
+        }
+    }
+    result
 }
 
 fn parse_gmail_message(v: &serde_json::Value) -> EmailMessage {
