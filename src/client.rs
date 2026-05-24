@@ -96,34 +96,34 @@ impl EmailClient {
     }
 
     async fn send_smtp(&self, host: &str, port: u16, username: &str, password: &str, from: &str, to: &str, subject: &str, body: &str) -> anyhow::Result<SendResult> {
-        // Use reqwest to call a local SMTP relay or use lettre-style raw socket
-        // For portability, we POST to the SMTP server via the submission port
         let raw_msg = format!(
             "From: {from}\r\nTo: {to}\r\nSubject: {subject}\r\nContent-Type: text/plain; charset=utf-8\r\nMIME-Version: 1.0\r\n\r\n{body}"
         );
-        // Connect via TCP and send SMTP commands
+
         use tokio::net::TcpStream;
         use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
-        let mut stream = TcpStream::connect(format!("{host}:{port}")).await?;
-        let (reader, mut writer) = stream.split();
+
+        let tcp = TcpStream::connect(format!("{host}:{port}")).await?;
+
+        let tls_connector = {
+            let mut root_store = tokio_rustls::rustls::RootCertStore::empty();
+            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            let config = tokio_rustls::rustls::ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth();
+            tokio_rustls::TlsConnector::from(std::sync::Arc::new(config))
+        };
+        let domain = rustls_pki_types::ServerName::try_from(host)?.to_owned();
+        let tls = tls_connector.connect(domain, tcp).await?;
+        let (reader, mut writer) = tokio::io::split(tls);
         let mut reader = BufReader::new(reader);
         let mut line = String::new();
 
-        // Read greeting
-        reader.read_line(&mut line).await?;
-        line.clear();
-
+        // Greeting
+        reader.read_line(&mut line).await?; line.clear();
         // EHLO
-        writer.write_all(format!("EHLO mcp-email\r\n").as_bytes()).await?;
+        writer.write_all(b"EHLO mcp-email\r\n").await?;
         loop { line.clear(); reader.read_line(&mut line).await?; if line.starts_with("250 ") { break; } }
-
-        // STARTTLS if port 587
-        if port == 587 {
-            writer.write_all(b"STARTTLS\r\n").await?;
-            line.clear(); reader.read_line(&mut line).await?;
-            // For full TLS upgrade we'd need tokio-rustls — skip for now, assume port 25/465
-        }
-
         // AUTH LOGIN
         writer.write_all(b"AUTH LOGIN\r\n").await?;
         line.clear(); reader.read_line(&mut line).await?;
@@ -131,7 +131,9 @@ impl EmailClient {
         line.clear(); reader.read_line(&mut line).await?;
         writer.write_all(format!("{}\r\n", base64_encode(password.as_bytes())).as_bytes()).await?;
         line.clear(); reader.read_line(&mut line).await?;
-
+        if !line.starts_with("235") {
+            anyhow::bail!("SMTP auth failed: {}", line.trim());
+        }
         // MAIL FROM / RCPT TO / DATA
         writer.write_all(format!("MAIL FROM:<{from}>\r\n").as_bytes()).await?;
         line.clear(); reader.read_line(&mut line).await?;
