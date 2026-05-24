@@ -146,33 +146,28 @@ impl EmailClient {
         Ok(SendResult { message_id: "smtp-sent".into(), backend: "smtp".into() })
     }
 
-    async fn send_ses(&self, region: &str, access_key: &str, secret_key: &str, from: &str, to: &str, subject: &str, body: &str, html: Option<&str>) -> anyhow::Result<SendResult> {
-        let endpoint = format!("https://email.{region}.amazonaws.com");
-        let mut params = HashMap::new();
-        params.insert("Action", "SendEmail");
-        params.insert("Source", from);
-        params.insert("Destination.ToAddresses.member.1", to);
-        params.insert("Message.Subject.Data", subject);
-        params.insert("Message.Body.Text.Data", body);
-        if let Some(h) = html {
-            params.insert("Message.Body.Html.Data", h);
-        }
+    async fn send_ses(&self, region: &str, _access_key: &str, _secret_key: &str, from: &str, to: &str, subject: &str, body: &str, _html: Option<&str>) -> anyhow::Result<SendResult> {
+        let input = serde_json::json!({
+            "Source": from,
+            "Destination": {"ToAddresses": [to]},
+            "Message": {
+                "Subject": {"Data": subject},
+                "Body": {"Text": {"Data": body}}
+            }
+        });
+        let input_str = serde_json::to_string(&input)?;
+        let output = tokio::process::Command::new("aws")
+            .args(["ses", "send-email", "--region", region, "--cli-input-json", &input_str])
+            .output().await?;
 
-        // SES v1 query API with basic auth header (simplified — production should use SigV4)
-        let resp = self.http.post(&endpoint)
-            .form(&params)
-            .header("X-Amz-Access-Key", access_key)
-            .header("X-Amz-Secret-Key", secret_key)
-            .send().await?;
-
-        if resp.status().is_success() {
-            let text = resp.text().await?;
-            let msg_id = text.split("<MessageId>").nth(1)
-                .and_then(|s| s.split("</MessageId>").next())
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            let msg_id = text.split("MessageId").nth(1)
+                .and_then(|s| s.split('"').nth(2))
                 .unwrap_or("ses-sent").to_string();
             Ok(SendResult { message_id: msg_id, backend: "ses".into() })
         } else {
-            anyhow::bail!("SES error: {}", resp.text().await?)
+            anyhow::bail!("SES error: {}", String::from_utf8_lossy(&output.stderr))
         }
     }
 
