@@ -98,40 +98,63 @@ impl EmailClient {
 
     fn build_mime(&self, from: &str, to: &str, cc: Option<&str>, bcc: Option<&str>, subject: &str, body: &str, html: Option<&str>, attachments: Option<&[String]>) -> anyhow::Result<String> {
         use mail_builder::MessageBuilder;
-        let mut msg = MessageBuilder::new();
-        msg = msg.from(from).to(to).subject(subject).text_body(body);
-        if let Some(h) = html {
-            msg = msg.html_body(h);
-        }
-        if let Some(cc_addrs) = cc {
-            for addr in cc_addrs.split(',') {
-                msg = msg.cc(addr.trim());
-            }
-        }
-        if let Some(bcc_addrs) = bcc {
-            for addr in bcc_addrs.split(',') {
-                msg = msg.bcc(addr.trim());
-            }
-        }
+
+        // Collect attachment data first (before builder chain)
+        let mut att_data: Vec<(String, Vec<u8>)> = Vec::new();
         if let Some(files) = attachments {
             for path in files {
                 let file_path = std::path::Path::new(path);
-                let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("attachment");
+                let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("attachment").to_string();
                 let content = std::fs::read(file_path)?;
-                let ct = match file_path.extension().and_then(|e| e.to_str()) {
-                    Some("pdf") => "application/pdf",
-                    Some("png") => "image/png",
-                    Some("jpg" | "jpeg") => "image/jpeg",
-                    Some("zip") => "application/zip",
-                    Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    Some("xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    _ => "application/octet-stream",
-                };
-                msg = msg.attachment(ct, filename, content);
+                att_data.push((filename, content));
             }
         }
-        let bytes = msg.write_to_vec()?;
+
+        // Build using chaining exactly like the docs example
+        let mut builder = MessageBuilder::new()
+            .from(from)
+            .to(to)
+            .subject(subject)
+            .text_body(body);
+
+        // Add HTML body
+        if let Some(h) = html {
+            builder = builder.html_body(h);
+        }
+
+        // Add CC
+        if let Some(cc_addrs) = cc {
+            for addr in cc_addrs.split(',') {
+                builder = builder.cc(addr.trim());
+            }
+        }
+
+        // Add BCC
+        if let Some(bcc_addrs) = bcc {
+            for addr in bcc_addrs.split(',') {
+                builder = builder.bcc(addr.trim());
+            }
+        }
+
+        // Add attachments
+        for (filename, content) in &att_data {
+            builder = builder.attachment("application/octet-stream", filename.as_str(), content.as_slice());
+        }
+
+        let bytes = builder.write_to_vec()?;
         Ok(String::from_utf8_lossy(&bytes).to_string())
+    }
+
+    fn guess_mime(path: &std::path::Path) -> &'static str {
+        match path.extension().and_then(|e| e.to_str()) {
+            Some("pdf") => "application/pdf",
+            Some("png") => "image/png",
+            Some("jpg" | "jpeg") => "image/jpeg",
+            Some("zip") => "application/zip",
+            Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            Some("xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            _ => "application/octet-stream",
+        }
     }
 
     async fn send_smtp_raw(&self, host: &str, port: u16, username: &str, password: &str, from: &str, to: &str, raw_msg: &str) -> anyhow::Result<SendResult> {
@@ -281,7 +304,8 @@ impl EmailClient {
     }
 
     async fn send_gmail_raw(&self, token: &str, raw_msg: &str) -> anyhow::Result<SendResult> {
-        let encoded = base64_url_encode(raw_msg.as_bytes());
+        use base64ct::{Base64UrlUnpadded, Encoding};
+        let encoded = Base64UrlUnpadded::encode_string(raw_msg.as_bytes());
         let resp: serde_json::Value = self.http
             .post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send")
             .bearer_auth(token)
@@ -586,7 +610,10 @@ impl EmailClient {
             let subject = format!("Re: {}", orig.subject.unwrap_or_default());
             let to = orig.from.unwrap_or_default();
             let raw = format!("To: {to}\r\nSubject: {subject}\r\nIn-Reply-To: {id}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{body}");
-            let encoded = base64_url_encode(raw.as_bytes());
+            let encoded = {
+                use base64ct::{Base64UrlUnpadded, Encoding};
+                Base64UrlUnpadded::encode_string(raw.as_bytes())
+            };
             let resp: serde_json::Value = self.http
                 .post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send")
                 .bearer_auth(token)

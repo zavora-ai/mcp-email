@@ -1,6 +1,6 @@
 [package]
 name = "mcp-email"
-version = "1.5.0"
+version = "1.6.0"
 edition = "2024"
 authors = ["James Karanja <james.karanja@zavora.ai>"]
 description = "Email MCP Server — multi-backend sending (SMTP, AWS SES, SendGrid, Gmail, Microsoft Graph) with inbox reading and management"
@@ -29,6 +29,7 @@ rustls = { version = "0.23", features = ["ring"] }
 rustls-pki-types = "1"
 mailparse = "0.15"
 mail-builder = "0.3"
+base64ct = { version = "1", features = ["alloc"] }
 webpki-roots = "0.26"
 tokio-util = { version = "0.7", features = ["compat"] }
 futures = "0.3"
