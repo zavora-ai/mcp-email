@@ -37,8 +37,14 @@ async fn main() -> anyhow::Result<()> {
         anyhow::bail!("No email send backend configured. Set one of: SMTP_HOST, SENDGRID_API_KEY, AWS_ACCESS_KEY_ID, GMAIL_ACCESS_TOKEN, or MS_GRAPH_TOKEN");
     };
 
-    // Detect read backend (optional — only Gmail and Microsoft support reading)
-    let read_backend = if let Ok(token) = std::env::var("GMAIL_ACCESS_TOKEN") {
+    // Detect read backend (priority: IMAP > Gmail > Microsoft)
+    let read_backend = if let (Ok(host), Ok(user), Ok(pass)) = (
+        std::env::var("IMAP_HOST"), std::env::var("IMAP_USERNAME"), std::env::var("IMAP_PASSWORD")
+    ) {
+        let port = std::env::var("IMAP_PORT").unwrap_or_else(|_| "993".into()).parse().unwrap_or(993);
+        tracing::info!(backend = "imap", host = %host, "Read backend configured");
+        Some(ReadBackend::Imap { host, port, username: user, password: pass })
+    } else if let Ok(token) = std::env::var("GMAIL_ACCESS_TOKEN") {
         Some(ReadBackend::Gmail { token })
     } else if let Ok(token) = std::env::var("MS_GRAPH_TOKEN") {
         Some(ReadBackend::Microsoft { token })

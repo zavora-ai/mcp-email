@@ -1,6 +1,6 @@
 [package]
 name = "mcp-email"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2024"
 authors = ["James Karanja <james.karanja@zavora.ai>"]
 description = "Email MCP Server — multi-backend sending (SMTP, AWS SES, SendGrid, Gmail, Microsoft Graph) with inbox reading and management"
@@ -23,5 +23,12 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait = "0.1"
 schemars = "1"
+async-imap = "0.11"
+tokio-rustls = "0.26"
+rustls-pki-types = "1"
+mailparse = "0.15"
+webpki-roots = "0.26"
+tokio-util = { version = "0.7", features = ["compat"] }
+futures = "0.3"
 
 [workspace]

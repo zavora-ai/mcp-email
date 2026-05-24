@@ -234,19 +234,148 @@ impl EmailClient {
         match &self.read_backend {
             Some(ReadBackend::Gmail { token }) => Ok((token, true)),
             Some(ReadBackend::Microsoft { token }) => Ok((token, false)),
-            Some(ReadBackend::Imap { .. }) => anyhow::bail!("IMAP read not yet implemented"),
+            Some(ReadBackend::Imap { .. }) => anyhow::bail!("__IMAP__"), // sentinel — handled separately
             None => {
-                // Fallback: try send backend if it's Gmail/Microsoft
                 match &self.send_backend {
                     SendBackend::Gmail { token } => Ok((token, true)),
                     SendBackend::Microsoft { token } => Ok((token, false)),
-                    _ => anyhow::bail!("No read backend configured. Set GMAIL_ACCESS_TOKEN or MS_GRAPH_TOKEN."),
+                    _ => anyhow::bail!("No read backend configured. Set IMAP_HOST, GMAIL_ACCESS_TOKEN, or MS_GRAPH_TOKEN."),
                 }
             }
         }
     }
 
+    fn is_imap(&self) -> bool {
+        matches!(&self.read_backend, Some(ReadBackend::Imap { .. }))
+    }
+
+    async fn imap_fetch_messages(&self, folder: &str, limit: u32) -> anyhow::Result<Vec<EmailMessage>> {
+        let (host, port, username, password) = match &self.read_backend {
+            Some(ReadBackend::Imap { host, port, username, password }) => (host.clone(), *port, username.clone(), password.clone()),
+            _ => anyhow::bail!("Not IMAP backend"),
+        };
+
+        use tokio_util::compat::TokioAsyncReadCompatExt;
+        use futures::TryStreamExt;
+
+        let tcp = tokio::net::TcpStream::connect(format!("{host}:{port}")).await?;
+        let tls = {
+            let mut root_store = tokio_rustls::rustls::RootCertStore::empty();
+            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            let config = tokio_rustls::rustls::ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth();
+            let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(config));
+            let domain = rustls_pki_types::ServerName::try_from(host.as_str())?.to_owned();
+            connector.connect(domain, tcp).await?
+        };
+
+        let mut client = async_imap::Client::new(tls.compat());
+        let _greeting = client.read_response().await;
+        let mut session = client.login(&username, &password).await.map_err(|e| anyhow::anyhow!("{}", e.0))?;
+        session.select(folder).await?;
+
+        let search = session.search("ALL").await?;
+        let mut uids: Vec<_> = search.into_iter().collect();
+        uids.sort_unstable();
+        uids.reverse();
+        uids.truncate(limit as usize);
+
+        if uids.is_empty() {
+            session.logout().await?;
+            return Ok(vec![]);
+        }
+
+        let uid_set = uids.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
+        let messages: Vec<_> = session.fetch(&uid_set, "(RFC822.HEADER FLAGS)").await?.try_collect().await?;
+
+        let mut result = Vec::new();
+        for msg in &messages {
+            if let Some(header_bytes) = msg.header() {
+                if let Ok((headers, _)) = mailparse::parse_headers(header_bytes) {
+                    let get = |name: &str| headers.iter().find(|h| h.get_key_ref().eq_ignore_ascii_case(name)).map(|h| h.get_value());
+                    result.push(EmailMessage {
+                        id: msg.message.to_string(),
+                        subject: get("Subject"),
+                        from: get("From"),
+                        to: get("To"),
+                        snippet: None,
+                        date: get("Date"),
+                        is_read: Some(msg.flags().any(|f| matches!(f, async_imap::types::Flag::Seen))),
+                    });
+                }
+            }
+        }
+        session.logout().await?;
+        Ok(result)
+    }
+
+    async fn imap_search(&self, query: &str, limit: u32) -> anyhow::Result<Vec<EmailMessage>> {
+        let (host, port, username, password) = match &self.read_backend {
+            Some(ReadBackend::Imap { host, port, username, password }) => (host.clone(), *port, username.clone(), password.clone()),
+            _ => anyhow::bail!("Not IMAP backend"),
+        };
+
+        use tokio_util::compat::TokioAsyncReadCompatExt;
+        use futures::TryStreamExt;
+
+        let tcp = tokio::net::TcpStream::connect(format!("{host}:{port}")).await?;
+        let tls = {
+            let mut root_store = tokio_rustls::rustls::RootCertStore::empty();
+            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            let config = tokio_rustls::rustls::ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth();
+            let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(config));
+            let domain = rustls_pki_types::ServerName::try_from(host.as_str())?.to_owned();
+            connector.connect(domain, tcp).await?
+        };
+
+        let mut client = async_imap::Client::new(tls.compat());
+        let _greeting = client.read_response().await;
+        let mut session = client.login(&username, &password).await.map_err(|e| anyhow::anyhow!("{}", e.0))?;
+        session.select("INBOX").await?;
+
+        let search_cmd = format!("OR SUBJECT \"{}\" FROM \"{}\"", query, query);
+        let search_results = session.search(&search_cmd).await?;
+        let mut uids: Vec<_> = search_results.into_iter().collect();
+        uids.sort_unstable();
+        uids.reverse();
+        uids.truncate(limit as usize);
+
+        if uids.is_empty() {
+            session.logout().await?;
+            return Ok(vec![]);
+        }
+
+        let uid_set = uids.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
+        let messages: Vec<_> = session.fetch(&uid_set, "(RFC822.HEADER FLAGS)").await?.try_collect().await?;
+
+        let mut result = Vec::new();
+        for msg in &messages {
+            if let Some(header_bytes) = msg.header() {
+                if let Ok((headers, _)) = mailparse::parse_headers(header_bytes) {
+                    let get = |name: &str| headers.iter().find(|h| h.get_key_ref().eq_ignore_ascii_case(name)).map(|h| h.get_value());
+                    result.push(EmailMessage {
+                        id: msg.message.to_string(),
+                        subject: get("Subject"),
+                        from: get("From"),
+                        to: get("To"),
+                        snippet: None,
+                        date: get("Date"),
+                        is_read: Some(msg.flags().any(|f| matches!(f, async_imap::types::Flag::Seen))),
+                    });
+                }
+            }
+        }
+        session.logout().await?;
+        Ok(result)
+    }
+
     pub async fn list_inbox(&self, limit: u32) -> anyhow::Result<Vec<EmailMessage>> {
+        if self.is_imap() {
+            return self.imap_fetch_messages("INBOX", limit).await;
+        }
         let (token, is_gmail) = self.read_token()?;
         if is_gmail {
             let resp: serde_json::Value = self.http
@@ -298,6 +427,9 @@ impl EmailClient {
     }
 
     pub async fn search_emails(&self, query: &str, limit: u32) -> anyhow::Result<Vec<EmailMessage>> {
+        if self.is_imap() {
+            return self.imap_search(query, limit).await;
+        }
         let (token, is_gmail) = self.read_token()?;
         if is_gmail {
             let resp: serde_json::Value = self.http

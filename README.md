@@ -57,10 +57,11 @@ SMTP → SendGrid → AWS SES → Gmail → Microsoft
 
 | Backend | Env Vars | Capabilities |
 |---------|----------|-------------|
+| **IMAP** (default) | `IMAP_HOST`, `IMAP_PORT`, `IMAP_USERNAME`, `IMAP_PASSWORD` | Inbox, search, flags — works with any email provider |
 | **Gmail API** | `GMAIL_ACCESS_TOKEN` | Inbox, search, labels, attachments |
 | **Microsoft Graph** | `MS_GRAPH_TOKEN` | Inbox, search, folders, attachments |
 
-> **Note:** SMTP, SendGrid, and SES are send-only. To read emails with those backends, also set `GMAIL_ACCESS_TOKEN` or `MS_GRAPH_TOKEN`.
+> **IMAP works with any provider** — Gmail, Outlook, Yahoo, Fastmail, Zoho, self-hosted. No OAuth needed, just host/user/password.
 
 ## Installation
 
@@ -87,6 +88,22 @@ export SMTP_USERNAME="you@gmail.com"
 export SMTP_PASSWORD="app-password"
 export SMTP_FROM="you@gmail.com"
 ```
+
+### IMAP (read inbox — works with any provider)
+
+```bash
+export IMAP_HOST="imap.gmail.com"
+export IMAP_PORT="993"
+export IMAP_USERNAME="you@gmail.com"
+export IMAP_PASSWORD="app-password"
+```
+
+Common IMAP hosts:
+- Gmail: `imap.gmail.com:993`
+- Outlook: `outlook.office365.com:993`
+- Yahoo: `imap.mail.yahoo.com:993`
+- Fastmail: `imap.fastmail.com:993`
+- Zoho: `imap.zoho.com:993`
 
 ### SendGrid
 
