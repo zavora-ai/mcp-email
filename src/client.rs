@@ -74,10 +74,10 @@ impl EmailClient {
 
     // ─── SEND ────────────────────────────────────────────────────────────────
 
-    pub async fn send_email(&self, to: &str, subject: &str, body: &str, html: Option<&str>, _cc: Option<&str>, _bcc: Option<&str>, attachments: Option<&[String]>) -> anyhow::Result<SendResult> {
+    pub async fn send_email(&self, to: &str, subject: &str, body: &str, html: Option<&str>, cc: Option<&str>, bcc: Option<&str>, attachments: Option<&[String]>) -> anyhow::Result<SendResult> {
         match &self.send_backend {
             SendBackend::Smtp { host, port, username, password, from } => {
-                let raw = self.build_mime(from, to, subject, body, html, attachments)?;
+                let raw = self.build_mime(from, to, cc, bcc, subject, body, html, attachments)?;
                 self.send_smtp_raw(host, *port, username, password, from, to, &raw).await
             }
             SendBackend::Ses { region, access_key, secret_key, from } => {
@@ -87,7 +87,7 @@ impl EmailClient {
                 self.send_sendgrid(api_key, from, to, subject, body, html).await
             }
             SendBackend::Gmail { token } => {
-                let raw = self.build_mime("me", to, subject, body, html, attachments)?;
+                let raw = self.build_mime("me", to, cc, bcc, subject, body, html, attachments)?;
                 self.send_gmail_raw(token, &raw).await
             }
             SendBackend::Microsoft { token } => {
@@ -96,10 +96,23 @@ impl EmailClient {
         }
     }
 
-    fn build_mime(&self, from: &str, to: &str, subject: &str, body: &str, _html: Option<&str>, attachments: Option<&[String]>) -> anyhow::Result<String> {
+    fn build_mime(&self, from: &str, to: &str, cc: Option<&str>, bcc: Option<&str>, subject: &str, body: &str, html: Option<&str>, attachments: Option<&[String]>) -> anyhow::Result<String> {
         use mail_builder::MessageBuilder;
         let mut msg = MessageBuilder::new();
         msg = msg.from(from).to(to).subject(subject).text_body(body);
+        if let Some(h) = html {
+            msg = msg.html_body(h);
+        }
+        if let Some(cc_addrs) = cc {
+            for addr in cc_addrs.split(',') {
+                msg = msg.cc(addr.trim());
+            }
+        }
+        if let Some(bcc_addrs) = bcc {
+            for addr in bcc_addrs.split(',') {
+                msg = msg.bcc(addr.trim());
+            }
+        }
         if let Some(files) = attachments {
             for path in files {
                 let file_path = std::path::Path::new(path);
