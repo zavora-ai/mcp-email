@@ -1,0 +1,74 @@
+server_id = "mcp_email"
+display_name = "Email"
+version = "1.0.0"
+domain = "communication"
+sdk_version = "0.1.0"
+risk_level = "high"
+writes_allowed = "gated"
+transports = ["stdio"]
+credentials = ["vault://gmail-token", "vault://ms-graph-token"]
+governance_gates = []
+environments = ["development", "staging", "production"]
+
+[[tools]]
+name = "send_email"
+description = "Send an email"
+risk_class = "external_write"
+requires_approval = true
+credential_bindings = ["vault://gmail-token", "vault://ms-graph-token"]
+
+[[tools]]
+name = "list_inbox"
+description = "List inbox messages"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = ["vault://gmail-token", "vault://ms-graph-token"]
+
+[[tools]]
+name = "get_email"
+description = "Get a specific email by ID"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = ["vault://gmail-token", "vault://ms-graph-token"]
+
+[[tools]]
+name = "search_emails"
+description = "Search emails by query"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = ["vault://gmail-token", "vault://ms-graph-token"]
+
+[[tools]]
+name = "reply_to_email"
+description = "Reply to an email"
+risk_class = "external_write"
+requires_approval = true
+credential_bindings = ["vault://gmail-token", "vault://ms-graph-token"]
+
+[[tools]]
+name = "list_labels"
+description = "List email labels/folders"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = ["vault://gmail-token", "vault://ms-graph-token"]
+
+[[tools]]
+name = "move_to_folder"
+description = "Move an email to a folder/label"
+risk_class = "external_write"
+requires_approval = false
+credential_bindings = ["vault://gmail-token", "vault://ms-graph-token"]
+
+[[tools]]
+name = "mark_read"
+description = "Mark an email as read"
+risk_class = "external_write"
+requires_approval = false
+credential_bindings = ["vault://gmail-token", "vault://ms-graph-token"]
+
+[[tools]]
+name = "get_attachments"
+description = "Get attachments for an email"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = ["vault://gmail-token", "vault://ms-graph-token"]
