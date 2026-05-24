@@ -21,6 +21,9 @@ pub struct SendEmailInput {
     /// Optional BCC recipients (comma-separated)
     #[serde(default)]
     pub bcc: Option<String>,
+    /// Optional file paths to attach
+    #[serde(default)]
+    pub attachments: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -153,7 +156,7 @@ pub struct EmailServer {
 impl EmailServer {
     #[tool(description = "Send an email (supports plain text, HTML, CC, BCC). Uses configured backend.")]
     async fn send_email(&self, Parameters(i): Parameters<SendEmailInput>) -> String {
-        match self.client.send_email(&i.to, &i.subject, &i.body, i.html.as_deref(), i.cc.as_deref(), i.bcc.as_deref()).await {
+        match self.client.send_email(&i.to, &i.subject, &i.body, i.html.as_deref(), i.cc.as_deref(), i.bcc.as_deref(), i.attachments.as_deref()).await {
             Ok(r) => format!("Email sent via {} (id: {})", r.backend, r.message_id),
             Err(e) => format!("Error: {e}"),
         }

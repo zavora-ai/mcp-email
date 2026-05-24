@@ -74,10 +74,11 @@ impl EmailClient {
 
     // ─── SEND ────────────────────────────────────────────────────────────────
 
-    pub async fn send_email(&self, to: &str, subject: &str, body: &str, html: Option<&str>, _cc: Option<&str>, _bcc: Option<&str>) -> anyhow::Result<SendResult> {
+    pub async fn send_email(&self, to: &str, subject: &str, body: &str, html: Option<&str>, _cc: Option<&str>, _bcc: Option<&str>, attachments: Option<&[String]>) -> anyhow::Result<SendResult> {
         match &self.send_backend {
             SendBackend::Smtp { host, port, username, password, from } => {
-                self.send_smtp(host, *port, username, password, from, to, subject, body).await
+                let raw = self.build_mime(from, to, subject, body, html, attachments)?;
+                self.send_smtp_raw(host, *port, username, password, from, to, &raw).await
             }
             SendBackend::Ses { region, access_key, secret_key, from } => {
                 self.send_ses(region, access_key, secret_key, from, to, subject, body, html).await
@@ -86,13 +87,60 @@ impl EmailClient {
                 self.send_sendgrid(api_key, from, to, subject, body, html).await
             }
             SendBackend::Gmail { token } => {
-                self.send_gmail(token, to, subject, body).await
+                let raw = self.build_mime("me", to, subject, body, html, attachments)?;
+                self.send_gmail_raw(token, &raw).await
             }
             SendBackend::Microsoft { token } => {
                 self.send_microsoft(token, to, subject, body).await
             }
         }
     }
+
+    fn build_mime(&self, from: &str, to: &str, subject: &str, body: &str, _html: Option<&str>, attachments: Option<&[String]>) -> anyhow::Result<String> {
+        let boundary = format!("----=_Part_{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+
+        let has_attachments = attachments.map_or(false, |a| !a.is_empty());
+
+        if !has_attachments {
+            return Ok(format!(
+                "From: {from}\r\nTo: {to}\r\nSubject: {subject}\r\nContent-Type: text/plain; charset=utf-8\r\nMIME-Version: 1.0\r\n\r\n{body}"
+            ));
+        }
+
+        let mut msg = format!(
+            "From: {from}\r\nTo: {to}\r\nSubject: {subject}\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n--{boundary}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\n{body}\r\n"
+        );
+
+        if let Some(files) = attachments {
+            for path in files {
+                let file_path = std::path::Path::new(path);
+                let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("attachment");
+                let content = std::fs::read(file_path)?;
+                let encoded = base64_encode(&content);
+                let mime_type = match file_path.extension().and_then(|e| e.to_str()) {
+                    Some("pdf") => "application/pdf",
+                    Some("png") => "image/png",
+                    Some("jpg" | "jpeg") => "image/jpeg",
+                    Some("gif") => "image/gif",
+                    Some("zip") => "application/zip",
+                    Some("doc" | "docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    Some("xls" | "xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    Some("csv") => "text/csv",
+                    Some("txt") => "text/plain",
+                    Some("html") => "text/html",
+                    Some("json") => "application/json",
+                    _ => "application/octet-stream",
+                };
+                msg.push_str(&format!(
+                    "--{boundary}\r\nContent-Type: {mime_type}; name=\"{filename}\"\r\nContent-Disposition: attachment; filename=\"{filename}\"\r\nContent-Transfer-Encoding: base64\r\n\r\n{encoded}\r\n"
+                ));
+            }
+        }
+        msg.push_str(&format!("--{boundary}--\r\n"));
+        Ok(msg)
+    }
+
+    async fn send_smtp_raw(&self, host: &str, port: u16, username: &str, password: &str, from: &str, to: &str, raw_msg: &str) -> anyhow::Result<SendResult> {
 
     async fn send_smtp(&self, host: &str, port: u16, username: &str, password: &str, from: &str, to: &str, subject: &str, body: &str) -> anyhow::Result<SendResult> {
         let raw_msg = format!(
@@ -240,7 +288,11 @@ impl EmailClient {
 
     async fn send_gmail(&self, token: &str, to: &str, subject: &str, body: &str) -> anyhow::Result<SendResult> {
         let raw = format!("To: {to}\r\nSubject: {subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{body}");
-        let encoded = base64_url_encode(raw.as_bytes());
+        self.send_gmail_raw(token, &raw).await
+    }
+
+    async fn send_gmail_raw(&self, token: &str, raw_msg: &str) -> anyhow::Result<SendResult> {
+        let encoded = base64_url_encode(raw_msg.as_bytes());
         let resp: serde_json::Value = self.http
             .post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send")
             .bearer_auth(token)
