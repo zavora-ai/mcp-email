@@ -5,7 +5,7 @@
 [![ADK-Rust Enterprise](https://img.shields.io/badge/ADK--Rust-Enterprise-purple.svg)](https://enterprise.adk-rust.com)
 [![Registry Ready](https://img.shields.io/badge/ADK_Registry-Ready-green.svg)](https://www.zavora.ai)
 
-The most complete multi-backend email MCP server. **24 tools** across **5 send backends** and **3 read backends** — send via SMTP, AWS SES, or SendGrid while reading from any IMAP server. Single Rust binary with enterprise governance.
+The most complete multi-backend email MCP server. **24 tools** across **5 send backends** and **3 read backends** — send via SMTP, AWS SES, or SendGrid while reading from any IMAP server. File attachments, OAuth with auto-refresh, single Rust binary with enterprise governance.
 
 ## Architecture
 
@@ -32,7 +32,7 @@ The most complete multi-backend email MCP server. **24 tools** across **5 send b
 | Reply | ✅ (reply-all) | ❌ | ✅ |
 | Forward | ✅ | ❌ | ✅ |
 | Drafts (create/list/send) | ✅ | ✅ | ✅ |
-| Attachments send | ✅ | ✅ | ❌ (planned) |
+| Attachments send | ✅ | ✅ | ✅ |
 | Attachments download | ✅ | ✅ | ✅ (base64) |
 | Threads/conversations | ✅ | ❌ | ✅ |
 | Full body retrieval | ✅ | ✅ | ✅ |
@@ -337,7 +337,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 ```toml
 server_id = "mcp_email"
 display_name = "Email"
-version = "1.3.0"
+version = "1.5.0"
 domain = "collaboration"
 risk_level = "medium"
 writes_allowed = "gated"
@@ -347,12 +347,22 @@ governance_gates = []
 environments = ["development", "staging", "production"]
 ```
 
+## OAuth Setup (one-time)
+
+```bash
+# Gmail — opens browser for Google consent
+mcp-email auth gmail
+
+# Microsoft — opens browser for Microsoft consent
+mcp-email auth microsoft
+```
+
+Tokens are saved to `~/.mcp-email/` and auto-refresh before expiry. No manual token management after first auth.
+
 ## Roadmap
 
-- [ ] File attachment sending (local file paths)
 - [ ] Email filters (create/list/delete rules)
 - [ ] Multi-account support
-- [ ] OAuth2 PKCE flow for Gmail/Microsoft (no manual token)
 - [ ] Webhook for incoming email (SendGrid Inbound Parse)
 - [ ] Email templates (Handlebars/Tera)
 
