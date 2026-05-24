@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 480" font-family="system-ui,-apple-system,sans-serif" font-size="13">
+  <defs>
+    <linearGradient id="sendGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#dc2626"/>
+      <stop offset="100%" style="stop-color:#f97316"/>
+    </linearGradient>
+    <linearGradient id="readGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#2563eb"/>
+      <stop offset="100%" style="stop-color:#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="mcpGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#059669"/>
+      <stop offset="100%" style="stop-color:#10b981"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="900" height="480" rx="12" fill="#0f172a"/>
+  <text x="450" y="28" text-anchor="middle" fill="#94a3b8" font-size="11">MCP EMAIL SERVER — MULTI-BACKEND ARCHITECTURE</text>
+
+  <!-- MCP Clients -->
+  <rect x="30" y="160" width="150" height="160" rx="8" fill="#1e293b" stroke="#475569"/>
+  <text x="105" y="182" text-anchor="middle" fill="#94a3b8" font-size="10">MCP CLIENTS</text>
+  <rect x="42" y="195" width="126" height="24" rx="4" fill="#334155"/>
+  <text x="105" y="212" text-anchor="middle" fill="#f1f5f9" font-size="10">Claude / Kiro</text>
+  <rect x="42" y="225" width="126" height="24" rx="4" fill="#334155"/>
+  <text x="105" y="242" text-anchor="middle" fill="#f1f5f9" font-size="10">Cursor / Codex</text>
+  <rect x="42" y="255" width="126" height="24" rx="4" fill="#334155"/>
+  <text x="105" y="272" text-anchor="middle" fill="#f1f5f9" font-size="10">Windsurf</text>
+  <rect x="42" y="285" width="126" height="24" rx="4" fill="#334155"/>
+  <text x="105" y="302" text-anchor="middle" fill="#f1f5f9" font-size="10">Any MCP Client</text>
+
+  <!-- Arrow -->
+  <line x1="180" y1="240" x2="240" y2="240" stroke="#6366f1" stroke-width="2"/>
+  <polygon points="240,235 250,240 240,245" fill="#6366f1"/>
+  <text x="215" y="230" text-anchor="middle" fill="#6366f1" font-size="9">stdio</text>
+
+  <!-- MCP Server -->
+  <rect x="250" y="50" width="240" height="380" rx="8" fill="url(#mcpGrad)" opacity="0.1" stroke="#10b981" stroke-width="1.5"/>
+  <text x="370" y="72" text-anchor="middle" fill="#10b981" font-size="13" font-weight="bold">mcp-email</text>
+  <text x="370" y="88" text-anchor="middle" fill="#64748b" font-size="9">Rust · rmcp 1.7 · 9 tools</text>
+
+  <!-- Tools -->
+  <rect x="262" y="100" width="216" height="24" rx="4" fill="#1e293b"/>
+  <text x="370" y="116" text-anchor="middle" fill="#f1f5f9" font-size="10">send_email (→ any backend)</text>
+  <rect x="262" y="130" width="216" height="24" rx="4" fill="#1e293b"/>
+  <text x="370" y="146" text-anchor="middle" fill="#f1f5f9" font-size="10">list_inbox · get_email · search</text>
+  <rect x="262" y="160" width="216" height="24" rx="4" fill="#1e293b"/>
+  <text x="370" y="176" text-anchor="middle" fill="#f1f5f9" font-size="10">reply · move · mark_read</text>
+  <rect x="262" y="190" width="216" height="24" rx="4" fill="#1e293b"/>
+  <text x="370" y="206" text-anchor="middle" fill="#f1f5f9" font-size="10">list_labels · get_attachments</text>
+
+  <!-- Send backend selector -->
+  <rect x="262" y="230" width="216" height="28" rx="4" fill="url(#sendGrad)" opacity="0.3"/>
+  <text x="370" y="249" text-anchor="middle" fill="#fbbf24" font-size="11" font-weight="600">SEND BACKEND (pick one)</text>
+
+  <!-- Read backend selector -->
+  <rect x="262" y="340" width="216" height="28" rx="4" fill="url(#readGrad)" opacity="0.3"/>
+  <text x="370" y="359" text-anchor="middle" fill="#38bdf8" font-size="11" font-weight="600">READ BACKEND (optional)</text>
+
+  <!-- Send backends list -->
+  <rect x="265" y="264" width="100" height="22" rx="3" fill="#1e293b"/>
+  <text x="315" y="279" text-anchor="middle" fill="#f87171" font-size="9">SMTP (default)</text>
+  <rect x="370" y="264" width="100" height="22" rx="3" fill="#1e293b"/>
+  <text x="420" y="279" text-anchor="middle" fill="#f87171" font-size="9">SendGrid</text>
+  <rect x="265" y="290" width="100" height="22" rx="3" fill="#1e293b"/>
+  <text x="315" y="305" text-anchor="middle" fill="#f87171" font-size="9">AWS SES</text>
+  <rect x="370" y="290" width="100" height="22" rx="3" fill="#1e293b"/>
+  <text x="420" y="305" text-anchor="middle" fill="#f87171" font-size="9">Gmail API</text>
+  <rect x="265" y="316" width="100" height="22" rx="3" fill="#1e293b"/>
+  <text x="315" y="331" text-anchor="middle" fill="#f87171" font-size="9">Microsoft Graph</text>
+
+  <!-- Read backends list -->
+  <rect x="265" y="374" width="100" height="22" rx="3" fill="#1e293b"/>
+  <text x="315" y="389" text-anchor="middle" fill="#38bdf8" font-size="9">Gmail API</text>
+  <rect x="370" y="374" width="100" height="22" rx="3" fill="#1e293b"/>
+  <text x="420" y="389" text-anchor="middle" fill="#38bdf8" font-size="9">Microsoft Graph</text>
+  <rect x="265" y="400" width="100" height="22" rx="3" fill="#1e293b"/>
+  <text x="315" y="415" text-anchor="middle" fill="#64748b" font-size="9">IMAP (planned)</text>
+
+  <!-- Arrows to backends -->
+  <line x1="490" y1="130" x2="550" y2="80" stroke="#f87171" stroke-width="1.5"/>
+  <line x1="490" y1="170" x2="550" y2="170" stroke="#f87171" stroke-width="1.5"/>
+  <line x1="490" y1="280" x2="550" y2="250" stroke="#f87171" stroke-width="1.5"/>
+  <line x1="490" y1="300" x2="550" y2="320" stroke="#f87171" stroke-width="1.5"/>
+  <line x1="490" y1="380" x2="550" y2="400" stroke="#38bdf8" stroke-width="1.5"/>
+
+  <!-- External services -->
+  <rect x="550" y="50" width="160" height="40" rx="6" fill="#1e293b" stroke="#f87171"/>
+  <text x="630" y="68" text-anchor="middle" fill="#f1f5f9" font-size="10">SMTP Relay</text>
+  <text x="630" y="82" text-anchor="middle" fill="#64748b" font-size="8">Postfix / Mailgun / any</text>
+
+  <rect x="550" y="100" width="160" height="40" rx="6" fill="#1e293b" stroke="#f87171"/>
+  <text x="630" y="118" text-anchor="middle" fill="#f1f5f9" font-size="10">SendGrid</text>
+  <text x="630" y="132" text-anchor="middle" fill="#64748b" font-size="8">api.sendgrid.com/v3</text>
+
+  <rect x="550" y="150" width="160" height="40" rx="6" fill="#1e293b" stroke="#f87171"/>
+  <text x="630" y="168" text-anchor="middle" fill="#f1f5f9" font-size="10">AWS SES</text>
+  <text x="630" y="182" text-anchor="middle" fill="#64748b" font-size="8">email.{region}.amazonaws.com</text>
+
+  <rect x="550" y="230" width="160" height="40" rx="6" fill="#1e293b" stroke="#a78bfa"/>
+  <text x="630" y="248" text-anchor="middle" fill="#f1f5f9" font-size="10">Gmail API</text>
+  <text x="630" y="262" text-anchor="middle" fill="#64748b" font-size="8">gmail.googleapis.com</text>
+
+  <rect x="550" y="300" width="160" height="40" rx="6" fill="#1e293b" stroke="#a78bfa"/>
+  <text x="630" y="318" text-anchor="middle" fill="#f1f5f9" font-size="10">Microsoft Graph</text>
+  <text x="630" y="332" text-anchor="middle" fill="#64748b" font-size="8">graph.microsoft.com</text>
+
+  <!-- Labels -->
+  <rect x="730" y="230" width="60" height="18" rx="3" fill="#f87171" opacity="0.3"/>
+  <text x="760" y="243" text-anchor="middle" fill="#f87171" font-size="8">SEND</text>
+  <rect x="730" y="252" width="60" height="18" rx="3" fill="#38bdf8" opacity="0.3"/>
+  <text x="760" y="265" text-anchor="middle" fill="#38bdf8" font-size="8">READ</text>
+  <text x="760" y="290" text-anchor="middle" fill="#64748b" font-size="8">Gmail &amp; MS</text>
+  <text x="760" y="302" text-anchor="middle" fill="#64748b" font-size="8">do both</text>
+
+  <!-- Footer -->
+  <text x="450" y="460" text-anchor="middle" fill="#475569" font-size="10">mcp-email v1.1.0 · 5 send backends · 2 read backends · reqwest + tokio</text>
+</svg>

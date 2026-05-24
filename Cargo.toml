@@ -1,9 +1,9 @@
 [package]
 name = "mcp-email"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 authors = ["James Karanja <james.karanja@zavora.ai>"]
-description = "Email MCP Server — Gmail and Microsoft Graph for sending, reading, and managing email"
+description = "Email MCP Server — multi-backend sending (SMTP, AWS SES, SendGrid, Gmail, Microsoft Graph) with inbox reading and management"
 license = "Apache-2.0"
 repository = "https://github.com/zavora-ai/mcp-email"
 homepage = "https://enterprise.adk-rust.com"
