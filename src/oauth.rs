@@ -198,7 +198,6 @@ pub async fn run_auth_flow(provider: &str, client_id: &str, client_secret: Optio
         ("code", code),
         ("redirect_uri", REDIRECT_URI.to_string()),
         ("client_id", client_id.to_string()),
-        ("code_verifier", verifier),
     ];
     if let Some(secret) = client_secret {
         params.push(("client_secret", secret.to_string()));
