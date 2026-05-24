@@ -37,6 +37,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env().add_directive("info".parse()?)).init();
 
     // Detect send backend (priority: SMTP > SendGrid > SES > Gmail > Microsoft)
+    // Each backend requires its OWN explicit config — won't activate from ambient env vars
     let send_backend = if let (Ok(host), Ok(user), Ok(pass)) = (
         std::env::var("SMTP_HOST"), std::env::var("SMTP_USERNAME"), std::env::var("SMTP_PASSWORD")
     ) {
@@ -44,13 +45,11 @@ async fn main() -> anyhow::Result<()> {
         let from = std::env::var("SMTP_FROM").or_else(|_| std::env::var("EMAIL_FROM")).unwrap_or_else(|_| user.clone());
         tracing::info!(backend = "smtp", host = %host, port, "Send backend configured");
         SendBackend::Smtp { host, port, username: user, password: pass, from }
-    } else if let Ok(api_key) = std::env::var("SENDGRID_API_KEY") {
-        let from = std::env::var("SENDGRID_FROM").or_else(|_| std::env::var("EMAIL_FROM")).expect("SENDGRID_FROM or EMAIL_FROM required");
+    } else if let (Ok(api_key), Ok(from)) = (std::env::var("SENDGRID_API_KEY"), std::env::var("SENDGRID_FROM").or_else(|_| std::env::var("EMAIL_FROM"))) {
         tracing::info!(backend = "sendgrid", "Send backend configured");
         SendBackend::SendGrid { api_key, from }
-    } else if let (Ok(access_key), Ok(secret_key)) = (std::env::var("AWS_ACCESS_KEY_ID"), std::env::var("AWS_SECRET_ACCESS_KEY")) {
+    } else if let (Ok(access_key), Ok(secret_key), Ok(from)) = (std::env::var("AWS_ACCESS_KEY_ID"), std::env::var("AWS_SECRET_ACCESS_KEY"), std::env::var("SES_FROM")) {
         let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".into());
-        let from = std::env::var("SES_FROM").or_else(|_| std::env::var("EMAIL_FROM")).expect("SES_FROM or EMAIL_FROM required");
         tracing::info!(backend = "ses", region = %region, "Send backend configured");
         SendBackend::Ses { region, access_key, secret_key, from }
     } else if let Ok(token) = resolve_gmail_token().await {
@@ -60,10 +59,11 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!(backend = "microsoft", "Send backend configured (OAuth)");
         SendBackend::Microsoft { token }
     } else {
-        anyhow::bail!("No send backend. Set SMTP_HOST, SENDGRID_API_KEY, AWS_ACCESS_KEY_ID, or run: mcp-email auth gmail");
+        anyhow::bail!("No send backend. Set SMTP_HOST, SENDGRID_API_KEY+SENDGRID_FROM, SES_FROM, or run: mcp-email auth gmail");
     };
 
     // Detect read backend (priority: IMAP > Gmail > Microsoft)
+    // Only activates if explicitly configured — won't bleed from send backend
     let read_backend = if let (Ok(host), Ok(user), Ok(pass)) = (
         std::env::var("IMAP_HOST"), std::env::var("IMAP_USERNAME"), std::env::var("IMAP_PASSWORD")
     ) {
@@ -77,6 +77,7 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!(backend = "microsoft", "Read backend configured (OAuth)");
         Some(ReadBackend::Microsoft { token })
     } else {
+        tracing::warn!("No read backend configured — read tools will return errors");
         None
     };
 

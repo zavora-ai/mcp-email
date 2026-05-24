@@ -105,6 +105,18 @@ The most complete multi-backend email MCP server. **24 tools** across **5 send b
 | `batch_move` | Move multiple emails to a folder | Internal write |
 | `batch_mark` | Mark multiple emails read/unread | Internal write |
 
+## Backend Status
+
+| Backend | Send | Read | OAuth | Tested |
+|---------|:---:|:---:|:---:|:---:|
+| **SMTP 465** | ✅ | — | — | ✅ |
+| **SMTP 587** (STARTTLS) | ✅ | — | — | ✅ |
+| **AWS SES** | ✅ | — | — | ✅ |
+| **SendGrid** | ✅ | — | — | Ready |
+| **Gmail API** | ✅ | ✅ | ✅ auto-refresh | ✅ |
+| **Microsoft Graph** | ✅ | ✅ | ✅ auto-refresh | Ready |
+| **IMAP** | — | ✅ | — | ✅ |
+
 ## Send Backends (5)
 
 | Backend | Env Vars | Use Case |
