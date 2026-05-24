@@ -97,55 +97,31 @@ impl EmailClient {
     }
 
     fn build_mime(&self, from: &str, to: &str, subject: &str, body: &str, _html: Option<&str>, attachments: Option<&[String]>) -> anyhow::Result<String> {
-        let boundary = format!("----=_Part_{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
-
-        let has_attachments = attachments.map_or(false, |a| !a.is_empty());
-
-        if !has_attachments {
-            return Ok(format!(
-                "From: {from}\r\nTo: {to}\r\nSubject: {subject}\r\nContent-Type: text/plain; charset=utf-8\r\nMIME-Version: 1.0\r\n\r\n{body}"
-            ));
-        }
-
-        let mut msg = format!(
-            "From: {from}\r\nTo: {to}\r\nSubject: {subject}\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n--{boundary}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\n{body}\r\n"
-        );
-
+        use mail_builder::MessageBuilder;
+        let mut msg = MessageBuilder::new();
+        msg = msg.from(from).to(to).subject(subject).text_body(body);
         if let Some(files) = attachments {
             for path in files {
                 let file_path = std::path::Path::new(path);
                 let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("attachment");
                 let content = std::fs::read(file_path)?;
-                let encoded = base64_encode(&content);
-                let mime_type = match file_path.extension().and_then(|e| e.to_str()) {
+                let ct = match file_path.extension().and_then(|e| e.to_str()) {
                     Some("pdf") => "application/pdf",
                     Some("png") => "image/png",
                     Some("jpg" | "jpeg") => "image/jpeg",
-                    Some("gif") => "image/gif",
                     Some("zip") => "application/zip",
-                    Some("doc" | "docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    Some("xls" | "xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    Some("csv") => "text/csv",
-                    Some("txt") => "text/plain",
-                    Some("html") => "text/html",
-                    Some("json") => "application/json",
+                    Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    Some("xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     _ => "application/octet-stream",
                 };
-                msg.push_str(&format!(
-                    "--{boundary}\r\nContent-Type: {mime_type}; name=\"{filename}\"\r\nContent-Disposition: attachment; filename=\"{filename}\"\r\nContent-Transfer-Encoding: base64\r\n\r\n{encoded}\r\n"
-                ));
+                msg = msg.attachment(ct, filename, content);
             }
         }
-        msg.push_str(&format!("--{boundary}--\r\n"));
-        Ok(msg)
+        let bytes = msg.write_to_vec()?;
+        Ok(String::from_utf8_lossy(&bytes).to_string())
     }
 
     async fn send_smtp_raw(&self, host: &str, port: u16, username: &str, password: &str, from: &str, to: &str, raw_msg: &str) -> anyhow::Result<SendResult> {
-
-    async fn send_smtp(&self, host: &str, port: u16, username: &str, password: &str, from: &str, to: &str, subject: &str, body: &str) -> anyhow::Result<SendResult> {
-        let raw_msg = format!(
-            "From: {from}\r\nTo: {to}\r\nSubject: {subject}\r\nContent-Type: text/plain; charset=utf-8\r\nMIME-Version: 1.0\r\n\r\n{body}"
-        );
 
         use tokio::net::TcpStream;
         use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
