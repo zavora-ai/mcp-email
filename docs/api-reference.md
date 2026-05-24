@@ -15,10 +15,10 @@ Send an email with optional HTML, CC/BCC, and file attachments.
 | `to` | string | ✅ | Recipient email address |
 | `subject` | string | ✅ | Subject line |
 | `body` | string | ✅ | Plain text body |
-| `html` | string | ❌ | HTML body (sent as multipart/alternative) |
-| `cc` | string | ❌ | CC recipients (comma-separated) |
-| `bcc` | string | ❌ | BCC recipients (comma-separated) |
-| `attachments` | string[] | ❌ | Absolute file paths to attach |
+| `html` | string | ✅ | HTML body (sent as multipart/alternative) |
+| `cc` | string | ✅ | CC recipients (comma-separated) |
+| `bcc` | string | ✅ | BCC recipients (comma-separated) |
+| `attachments` | string[] | ✅ | Absolute file paths to attach |
 
 **Example:**
 ```json
