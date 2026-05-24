@@ -102,8 +102,6 @@ impl EmailClient {
         use tokio::net::TcpStream;
         use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
 
-        let tcp = TcpStream::connect(format!("{host}:{port}")).await?;
-
         let tls_connector = {
             let mut root_store = tokio_rustls::rustls::RootCertStore::empty();
             root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -113,17 +111,58 @@ impl EmailClient {
             tokio_rustls::TlsConnector::from(std::sync::Arc::new(config))
         };
         let domain = rustls_pki_types::ServerName::try_from(host)?.to_owned();
-        let tls = tls_connector.connect(domain, tcp).await?;
-        let (reader, mut writer) = tokio::io::split(tls);
-        let mut reader = BufReader::new(reader);
+
+        let tcp = TcpStream::connect(format!("{host}:{port}")).await?;
+
+        if port == 587 || port == 25 {
+            // STARTTLS: connect plain, negotiate, then upgrade
+            let (reader, mut writer) = tokio::io::split(tcp);
+            let mut reader = BufReader::new(reader);
+            let mut line = String::new();
+
+            reader.read_line(&mut line).await?; line.clear();
+            writer.write_all(b"EHLO mcp-email\r\n").await?;
+            loop { line.clear(); reader.read_line(&mut line).await?; if line.starts_with("250 ") { break; } }
+            writer.write_all(b"STARTTLS\r\n").await?;
+            line.clear(); reader.read_line(&mut line).await?;
+            if !line.starts_with("220") {
+                anyhow::bail!("STARTTLS rejected: {}", line.trim());
+            }
+
+            // Reassemble the TcpStream from split halves
+            let tcp_reassembled = reader.into_inner().unsplit(writer);
+            let tls = tls_connector.connect(domain, tcp_reassembled).await?;
+            let (tls_reader, mut tls_writer) = tokio::io::split(tls);
+            let mut tls_reader = BufReader::new(tls_reader);
+            let mut line = String::new();
+
+            // Re-EHLO after TLS
+            tls_writer.write_all(b"EHLO mcp-email\r\n").await?;
+            loop { line.clear(); tls_reader.read_line(&mut line).await?; if line.starts_with("250 ") { break; } }
+
+            Self::smtp_auth_and_send(&mut tls_reader, &mut tls_writer, username, password, from, to, &raw_msg).await
+        } else {
+            // Port 465: implicit TLS
+            let tls = tls_connector.connect(domain, tcp).await?;
+            let (tls_reader, mut tls_writer) = tokio::io::split(tls);
+            let mut tls_reader = BufReader::new(tls_reader);
+            let mut line = String::new();
+
+            tls_reader.read_line(&mut line).await?; line.clear();
+            tls_writer.write_all(b"EHLO mcp-email\r\n").await?;
+            loop { line.clear(); tls_reader.read_line(&mut line).await?; if line.starts_with("250 ") { break; } }
+
+            Self::smtp_auth_and_send(&mut tls_reader, &mut tls_writer, username, password, from, to, &raw_msg).await
+        }
+    }
+
+    async fn smtp_auth_and_send<R: tokio::io::AsyncRead + Unpin, W: tokio::io::AsyncWrite + Unpin>(
+        reader: &mut tokio::io::BufReader<R>, writer: &mut W,
+        username: &str, password: &str, from: &str, to: &str, raw_msg: &str,
+    ) -> anyhow::Result<SendResult> {
+        use tokio::io::{AsyncWriteExt, AsyncBufReadExt};
         let mut line = String::new();
 
-        // Greeting
-        reader.read_line(&mut line).await?; line.clear();
-        // EHLO
-        writer.write_all(b"EHLO mcp-email\r\n").await?;
-        loop { line.clear(); reader.read_line(&mut line).await?; if line.starts_with("250 ") { break; } }
-        // AUTH LOGIN
         writer.write_all(b"AUTH LOGIN\r\n").await?;
         line.clear(); reader.read_line(&mut line).await?;
         writer.write_all(format!("{}\r\n", base64_encode(username.as_bytes())).as_bytes()).await?;
@@ -133,7 +172,7 @@ impl EmailClient {
         if !line.starts_with("235") {
             anyhow::bail!("SMTP auth failed: {}", line.trim());
         }
-        // MAIL FROM / RCPT TO / DATA
+
         writer.write_all(format!("MAIL FROM:<{from}>\r\n").as_bytes()).await?;
         line.clear(); reader.read_line(&mut line).await?;
         writer.write_all(format!("RCPT TO:<{to}>\r\n").as_bytes()).await?;
@@ -243,6 +282,54 @@ impl EmailClient {
 
     fn is_imap(&self) -> bool {
         matches!(&self.read_backend, Some(ReadBackend::Imap { .. }))
+    }
+
+    async fn imap_store_flag(&self, message_id: &str, action: &str, flag: &str) -> anyhow::Result<()> {
+        let (host, port, username, password) = match &self.read_backend {
+            Some(ReadBackend::Imap { host, port, username, password }) => (host.clone(), *port, username.clone(), password.clone()),
+            _ => anyhow::bail!("Not IMAP backend"),
+        };
+        use tokio_util::compat::TokioAsyncReadCompatExt;
+        let tcp = tokio::net::TcpStream::connect(format!("{host}:{port}")).await?;
+        let tls = {
+            let mut root_store = tokio_rustls::rustls::RootCertStore::empty();
+            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            let config = tokio_rustls::rustls::ClientConfig::builder().with_root_certificates(root_store).with_no_client_auth();
+            let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(config));
+            let domain = rustls_pki_types::ServerName::try_from(host.as_str())?.to_owned();
+            connector.connect(domain, tcp).await?
+        };
+        let mut client = async_imap::Client::new(tls.compat());
+        let _greeting = client.read_response().await;
+        let mut session = client.login(&username, &password).await.map_err(|e| anyhow::anyhow!("{}", e.0))?;
+        session.select("INBOX").await?;
+        session.store(message_id, format!("{action} ({flag})")).await?;
+        session.logout().await?;
+        Ok(())
+    }
+
+    async fn imap_move(&self, message_id: &str, folder: &str) -> anyhow::Result<()> {
+        let (host, port, username, password) = match &self.read_backend {
+            Some(ReadBackend::Imap { host, port, username, password }) => (host.clone(), *port, username.clone(), password.clone()),
+            _ => anyhow::bail!("Not IMAP backend"),
+        };
+        use tokio_util::compat::TokioAsyncReadCompatExt;
+        let tcp = tokio::net::TcpStream::connect(format!("{host}:{port}")).await?;
+        let tls = {
+            let mut root_store = tokio_rustls::rustls::RootCertStore::empty();
+            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            let config = tokio_rustls::rustls::ClientConfig::builder().with_root_certificates(root_store).with_no_client_auth();
+            let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(config));
+            let domain = rustls_pki_types::ServerName::try_from(host.as_str())?.to_owned();
+            connector.connect(domain, tcp).await?
+        };
+        let mut client = async_imap::Client::new(tls.compat());
+        let _greeting = client.read_response().await;
+        let mut session = client.login(&username, &password).await.map_err(|e| anyhow::anyhow!("{}", e.0))?;
+        session.select("INBOX").await?;
+        session.mv(message_id, folder).await?;
+        session.logout().await?;
+        Ok(())
     }
 
     async fn imap_fetch_messages(&self, folder: &str, limit: u32) -> anyhow::Result<Vec<EmailMessage>> {
@@ -496,6 +583,9 @@ impl EmailClient {
     }
 
     pub async fn move_to_folder(&self, message_id: &str, folder: &str) -> anyhow::Result<()> {
+        if self.is_imap() {
+            return self.imap_move(message_id, folder).await;
+        }
         let (token, is_gmail) = self.read_token()?;
         if is_gmail {
             self.http.post(format!("https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}/modify"))
@@ -512,6 +602,9 @@ impl EmailClient {
     }
 
     pub async fn mark_read(&self, message_id: &str) -> anyhow::Result<()> {
+        if self.is_imap() {
+            return self.imap_store_flag(message_id, "+FLAGS", "\\Seen").await;
+        }
         let (token, is_gmail) = self.read_token()?;
         if is_gmail {
             self.http.post(format!("https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}/modify"))
@@ -747,7 +840,9 @@ impl EmailClient {
     }
 
     pub async fn star_email(&self, message_id: &str) -> anyhow::Result<()> {
-        if self.is_imap() { anyhow::bail!("Not supported on IMAP"); }
+        if self.is_imap() {
+            return self.imap_store_flag(message_id, "+FLAGS", "\\Flagged").await;
+        }
         let (token, is_gmail) = self.read_token()?;
         if is_gmail {
             self.http.post(format!("https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}/modify"))
@@ -933,7 +1028,16 @@ impl EmailClient {
     }
 
     pub async fn batch_mark(&self, message_ids: &[String], read: bool) -> anyhow::Result<String> {
-        if self.is_imap() { anyhow::bail!("Not supported on IMAP"); }
+        if self.is_imap() {
+            for id in message_ids {
+                if read {
+                    self.imap_store_flag(id, "+FLAGS", "\\Seen").await?;
+                } else {
+                    self.imap_store_flag(id, "-FLAGS", "\\Seen").await?;
+                }
+            }
+            return Ok(format!("Marked {} messages", message_ids.len()));
+        }
         let (token, is_gmail) = self.read_token()?;
         if is_gmail {
             let body = if read {
