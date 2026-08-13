@@ -337,7 +337,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 ```toml
 server_id = "mcp_email"
 display_name = "Email"
-version = "1.5.0"
+version = "1.7.0"
 domain = "collaboration"
 risk_level = "medium"
 writes_allowed = "gated"

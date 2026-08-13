@@ -1,6 +1,6 @@
 server_id = "mcp_email"
 display_name = "Email"
-version = "1.6.0"
+version = "1.7.0"
 domain = "communication"
 sdk_version = "0.2.0"
 risk_level = "high"
