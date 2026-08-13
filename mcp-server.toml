@@ -1,18 +1,18 @@
 server_id = "mcp_email"
 display_name = "Email"
-version = "1.0.0"
+version = "1.6.0"
 domain = "communication"
-sdk_version = "0.1.0"
+sdk_version = "0.2.0"
 risk_level = "high"
 writes_allowed = "gated"
 transports = ["stdio"]
 credentials = ["vault://gmail-token", "vault://ms-graph-token"]
-governance_gates = []
+governance_gates = ["mrtr_approval"]
 environments = ["development", "staging", "production"]
 
 [[tools]]
 name = "send_email"
-description = "Send an email"
+description = "Send an email (supports plain text, HTML, CC, BCC). Uses configured backend."
 risk_class = "external_write"
 requires_approval = true
 credential_bindings = ["vault://gmail-token", "vault://ms-graph-token"]
@@ -56,14 +56,14 @@ credential_bindings = ["vault://gmail-token", "vault://ms-graph-token"]
 name = "move_to_folder"
 description = "Move an email to a folder/label"
 risk_class = "external_write"
-requires_approval = false
+requires_approval = true
 credential_bindings = ["vault://gmail-token", "vault://ms-graph-token"]
 
 [[tools]]
 name = "mark_read"
 description = "Mark an email as read"
 risk_class = "external_write"
-requires_approval = false
+requires_approval = true
 credential_bindings = ["vault://gmail-token", "vault://ms-graph-token"]
 
 [[tools]]
@@ -72,3 +72,108 @@ description = "Get attachments for an email"
 risk_class = "read_only"
 requires_approval = false
 credential_bindings = ["vault://gmail-token", "vault://ms-graph-token"]
+
+[[tools]]
+name = "forward_email"
+description = "Forward an email to new recipients"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "create_draft"
+description = "Create a draft email without sending"
+risk_class = "generated_write_draft"
+requires_approval = true
+credential_bindings = []
+
+[[tools]]
+name = "list_drafts"
+description = "List saved drafts"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "send_draft"
+description = "Send a saved draft"
+risk_class = "generated_write_draft"
+requires_approval = true
+credential_bindings = []
+
+[[tools]]
+name = "delete_email"
+description = "Delete an email (trash or permanent)"
+risk_class = "internal_write"
+requires_approval = true
+credential_bindings = []
+
+[[tools]]
+name = "mark_unread"
+description = "Mark an email as unread"
+risk_class = "internal_write"
+requires_approval = true
+credential_bindings = []
+
+[[tools]]
+name = "star_email"
+description = "Star/flag an email"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "get_email_body"
+description = "Get full email body content (HTML or text)"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "get_thread"
+description = "Get email thread/conversation"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "download_attachment"
+description = "Download attachment content as base64"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = []
+
+[[tools]]
+name = "create_label"
+description = "Create a new label/folder"
+risk_class = "internal_write"
+requires_approval = true
+credential_bindings = []
+
+[[tools]]
+name = "delete_label"
+description = "Delete a label/folder"
+risk_class = "internal_write"
+requires_approval = true
+credential_bindings = []
+
+[[tools]]
+name = "batch_delete"
+description = "Delete multiple emails at once"
+risk_class = "internal_write"
+requires_approval = true
+credential_bindings = []
+
+[[tools]]
+name = "batch_move"
+description = "Move multiple emails to a folder"
+risk_class = "internal_write"
+requires_approval = true
+credential_bindings = []
+
+[[tools]]
+name = "batch_mark"
+description = "Mark multiple emails as read or unread"
+risk_class = "read_only"
+requires_approval = false
+credential_bindings = []

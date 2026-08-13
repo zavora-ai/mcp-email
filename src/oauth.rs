@@ -75,6 +75,53 @@ fn save_token(provider: &str, token: &TokenStore) -> Result<()> {
     Ok(())
 }
 
+fn save_oauth_config(path: &std::path::Path, config: &OAuthConfig) -> Result<()> {
+    let contents = serde_json::to_vec_pretty(config)?;
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::os::unix::fs::PermissionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .mode(0o600)
+            .open(path)?;
+        file.write_all(&contents)?;
+        file.sync_all()?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    #[cfg(not(unix))]
+    std::fs::write(path, contents)?;
+    Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod permission_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn oauth_config_is_owner_only() {
+        let path = std::env::temp_dir().join(format!(
+            "mcp-email-oauth-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let config = OAuthConfig {
+            client_id: "test".into(),
+            client_secret: Some("secret".into()),
+        };
+        save_oauth_config(&path, &config).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
 pub async fn get_valid_token(provider: &str) -> Result<String> {
     let token = load_token(provider).ok_or_else(|| anyhow::anyhow!(
         "No token for {provider}. Run: mcp-email auth {provider}"
@@ -138,7 +185,7 @@ pub async fn run_auth_flow(provider: &str, client_id: &str, client_secret: Optio
     };
     let config_file = config_path(provider);
     std::fs::create_dir_all(config_file.parent().unwrap())?;
-    std::fs::write(&config_file, serde_json::to_string_pretty(&config)?)?;
+    save_oauth_config(&config_file, &config)?;
 
     // Generate PKCE
     use std::collections::hash_map::DefaultHasher;
