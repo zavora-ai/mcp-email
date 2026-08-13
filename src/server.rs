@@ -152,7 +152,7 @@ pub struct EmailServer {
     pub client: Arc<EmailClient>,
 }
 
-#[tool_router(server_handler)]
+#[tool_router]
 impl EmailServer {
     #[tool(description = "Send an email (supports plain text, HTML, CC, BCC). Uses configured backend.")]
     async fn send_email(&self, Parameters(i): Parameters<SendEmailInput>) -> String {
@@ -352,4 +352,11 @@ impl HealthCheck for EmailServer {
     async fn check_health(&self) -> HealthStatus {
         HealthStatus { healthy: true, message: Some("operational".into()), latency_ms: Some(1) }
     }
+}
+
+adk_mcp_sdk::mcp_2026_server! {
+    server: EmailServer,
+    task_tools: ["download_attachment", "batch_delete", "batch_move", "batch_mark"],
+    approval_tools: ["send_email", "reply_to_email", "move_to_folder", "mark_read", "create_draft", "send_draft", "delete_email", "mark_unread", "create_label", "delete_label", "batch_delete", "batch_move"],
+    cache_ttl_ms: 60_000,
 }
